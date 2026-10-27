@@ -5,6 +5,8 @@
   <arg name="map_name" default="latest" description="Map name in stack_master/maps" />
   <arg name="sim" default="False" description="True/False if you want to run simulation" />
   <arg name="loc_algorithm" default="slam" description="'slam' / 'synpf' to switch localisation algorithm" />
+  <arg name="rviz" default="True" description="True/False to open RViz with the simulator" />
+  <arg name="sim_overrides" default="" description="Optional YAML overriding config/SIM/sim.yaml (e.g. num_agent, spawn)" />
 
   <!-- Note: This is merely the share path (read-only) as the base_system
     is not expected to modify maps in any way. -->
@@ -14,6 +16,8 @@
   <group if="$(var sim)">
     <include file="$(find-pkg-share f1tenth_gym_ros)/launch/gym_bridge_launch.py">
       <arg name="map_yaml_path" value="$(var map_path)/$(var map_name).yaml" />
+      <arg name="rviz" value="$(var rviz)" />
+      <arg name="sim_overrides" value="$(var sim_overrides)" />
     </include>
   </group>
 
