@@ -40,6 +40,7 @@ class SectorTuner(Node):
         self.set_descriptor('global_limit',descriptor=desc)
         for i in range(self.n_sectors):
             self.set_descriptor('Sector'+str(i)+'.scaling',descriptor=desc)
+        self.clip_to_global_limit()  # global_limit must hold from the start, not only after a dynamic change
 
         # dyn params sub
         self.glb_wpnts_name = "/global_waypoints"
@@ -117,13 +118,16 @@ class SectorTuner(Node):
             return
         self.sectors_params = self.parameters_to_dict()
         # update params 
+        self.clip_to_global_limit()
+
+        self.get_logger().info(str(self.sectors_params))
+        self.publish_scaled()
+
+    def clip_to_global_limit(self):
         for i in range(self.n_sectors):
             self.sectors_params[f"Sector{i}"]['scaling'] = np.clip(
                 self.sectors_params[f"Sector{i}"]['scaling'], 0, self.sectors_params['global_limit']
             )
-
-        self.get_logger().info(str(self.sectors_params))
-        self.publish_scaled()
 
     def get_vel_scaling(self, s):
         """
