@@ -1,0 +1,12 @@
+# Quick end-to-end check of the pipeline: one short episode per opponent policy.
+name: smoke
+seed: 0
+episodes: 3
+tracks: [glc_ot_ez]
+ego: {policy: ego_h2h_spliner}
+opponents:
+  count: 1
+  policies: [opp_tt_raceline, opp_line_follower, opp_blocker]
+episode:
+  laps: 1
+  timeout_s: 60.0

@@ -1,0 +1,10 @@
+# Opponent: pure pursuit on a line shifted by a constant lateral offset, blind to the ego.
+name: opp_line_follower
+kind: python
+entrypoint: line_follower.py:LineFollower
+rate_hz: 50
+params:
+  line: centerline
+  d_offset_m: {uniform: [-0.25, 0.25]}
+  speed_scale: {uniform: [0.25, 0.4]}  # fraction of the raceline speed profile
+  lookahead_m: {uniform: [0.6, 1.0]}

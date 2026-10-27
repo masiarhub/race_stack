@@ -1,0 +1,9 @@
+# Ego: the race stack head-to-head stack (spline overtaking planner + opponent detection/tracking).
+name: ego_h2h_spliner
+kind: launch
+launch: {package: stack_master, file: head_to_head_launch.xml}
+args:
+  ctrl_algo: MAP
+  overtake_mode: spliner
+# the episode only starts once the tracker publishes, so x is never built from a cold tracker
+ready_topics: [/perception/obstacles]

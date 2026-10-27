@@ -60,3 +60,6 @@ sysid_bags/
 .env
 
 bags/
+
+# datagen output
+/data/

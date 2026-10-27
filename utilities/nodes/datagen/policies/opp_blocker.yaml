@@ -1,0 +1,13 @@
+# Opponent: like the line follower, but moves laterally in front of the ego when it is close behind.
+name: opp_blocker
+kind: python
+entrypoint: blocker.py:Blocker
+rate_hz: 50
+params:
+  line: centerline
+  d_offset_m: 0.0
+  speed_scale: {uniform: [0.25, 0.4]}
+  lookahead_m: 0.8
+  block_range_m: {uniform: [1.5, 4.0]}    # reacts when the ego is this close behind
+  max_lat_rate_mps: {uniform: [0.3, 1.0]} # how fast the blocking line moves sideways
+  margin_m: 0.25                          # kept to the track bounds
