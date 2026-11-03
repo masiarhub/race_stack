@@ -13,10 +13,9 @@ from rclpy.node import Node
 from rcl_interfaces.msg import ParameterDescriptor
 from ackermann_msgs.msg import AckermannDriveStamped
 from nav_msgs.msg import Odometry
-from tf_transformations import euler_from_quaternion
 
-from datagen.policy import AgentState, Obs, load_policy_class
-from datagen.track import LINE_KEYS, Track, body_to_map
+from datagen.policy import AgentState, Obs, load_policy_class, state_from_odom
+from datagen.track import LINE_KEYS, Track
 
 
 class PolicyRunner(Node):
@@ -42,13 +41,7 @@ class PolicyRunner(Node):
         self.get_logger().info(f"Policy {entrypoint} loaded")
 
     def state(self, msg: Odometry) -> AgentState:
-        p, q, tw = msg.pose.pose.position, msg.pose.pose.orientation, msg.twist.twist
-        yaw = euler_from_quaternion([q.x, q.y, q.z, q.w])[2]
-        cl = self.tracks['centerline']
-        s, d = cl.to_frenet(p.x, p.y)
-        vs, vd = cl.frenet_velocity(s, *body_to_map(yaw, tw.linear.x, tw.linear.y))
-        return AgentState(p.x, p.y, yaw, tw.linear.x, tw.linear.y, tw.angular.z,
-                          float(s), float(d), float(vs), float(vd))
+        return state_from_odom(msg, self.tracks['centerline'])
 
     def step(self):
         if self.own is None or self.other is None:

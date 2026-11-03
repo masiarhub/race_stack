@@ -160,3 +160,14 @@ class Policy:
     def act(self, obs: Obs) -> Tuple[float, float]:
         """Returns (steering angle [rad], speed [m/s])."""
         raise NotImplementedError
+
+
+def state_from_odom(msg, centerline) -> AgentState:
+    """AgentState of an Odometry message, as a python policy observes it."""
+    from datagen.track import body_to_map
+    p, q, tw = msg.pose.pose.position, msg.pose.pose.orientation, msg.twist.twist
+    yaw = float(np.arctan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y**2 + q.z**2)))
+    s, d = centerline.to_frenet(p.x, p.y)
+    vs, vd = centerline.frenet_velocity(s, *body_to_map(yaw, tw.linear.x, tw.linear.y))
+    return AgentState(p.x, p.y, yaw, tw.linear.x, tw.linear.y, tw.angular.z,
+                      float(s), float(d), float(vs), float(vd))
