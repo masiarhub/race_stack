@@ -33,7 +33,9 @@ EPISODE_DEFAULTS = {
 RECORD_TOPICS = [
     '/state_estimation/odom',       # ego ground truth (sim)
     '/opp_racecar/odom',            # opponent ground truth (sim)
+    '/opp_racecar/opp_odom',        # the ego as a python opponent policy observes it
     '/perception/obstacles',        # ego's tracker estimate of the opponent
+    '/perception/detection/raw_obstacles',  # ego's detector output, before tracking
     '/drive',                       # ego commands
     '/opp_drive',                   # opponent commands (action labels)
     '/car_state/frenet/odom',       # ego Frenet odom (raceline) of the stack
