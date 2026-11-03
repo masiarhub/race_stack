@@ -5,6 +5,15 @@ perception: separates the pipeline from the ego's perception. Per grid step it a
 (/perception/detection/raw_obstacles) and the tracker (/perception/obstacles) see the true opponent, and how far
 the tracker estimate is from the truth. It then builds the dataset twice, x from the tracker and x from the
 ground truth, and compares the x columns of the rows both versions keep.
+
+policies: known-answer checks against the opponent policies, whose definition and sampled parameters are stored
+per episode. Python policies are deterministic, so every recorded /opp_drive command is recomputed from the state
+the policy saw. For all policies the recorded motion is compared with what the parameters prescribe (offset, speed).
+
+labels: checks the labels against independent signals of the simulator. State labels (position differences) are
+compared with the recorded velocities, also shifted by a few steps to catch time misalignment, and once more on a
+wall-clock grid to show how much a lagging simulator would distort them. Action labels are replayed through the
+gym's own vehicle model, at the recorded physics steps, and compared with the true motion.
 """
 import json
 import os
@@ -298,6 +307,21 @@ HORIZONS_S = (0.25, 0.5, 1.0)  # open-loop replay horizons
 REPLAY_EVERY = 5               # start a replay at every n-th dataset row
 
 
+def step_over_velocity(s_unwrapped, sdot, dt: float) -> float:
+    """
+    Median of position step over velocity times dt (trapezoid over [k, k+1]): 1 when both signals agree.
+    Steps that differ from the expected one by more than 0.5 m (s jumps in ambiguous Frenet corners) are ignored.
+    """
+    step, expected = np.diff(s_unwrapped), dt * (sdot[:-1] + sdot[1:]) / 2
+    ok = np.abs(step - expected) < 0.5
+    return round(float(np.median(step[ok] / expected[ok])), 3) if ok.any() else None
+
+
+def _sdot(gt: dict, ref: Track) -> np.ndarray:
+    """ds/dt of a Frenet state: tangential speed / (1 - kappa d)."""
+    return gt['vs'] / (1 - ref.interp(ref.kappa, gt['s']) * gt['d'])
+
+
 def _shifted(a, j):
     """a[k + j] at index k, NaN outside."""
     out = np.full(len(a), np.nan)
@@ -361,8 +385,7 @@ def labels_episode(ep_dir: str, cfg: dict, replay: GymReplay) -> dict:
 
     # 1. state labels vs velocities: ds/dt = v_t / (1 - kappa d), dd/dt = v_n, trapezoid over [k, k+1]
     gt = gt_on_grid(opp_odom, grid, ref)
-    kappa = ref.interp(ref.kappa, gt['s'])
-    sdot, ddot = gt['vs'] / (1 - kappa * gt['d']), gt['vd']
+    sdot, ddot = _sdot(gt, ref), gt['vd']
     exp_ds = dt * (sdot + _shifted(sdot, 1)) / 2
     exp_dd = dt * (ddot + _shifted(ddot, 1)) / 2
     raw = pd.DataFrame({'t': episode.grid.t_s, 'k': np.arange(len(grid))})
@@ -375,6 +398,9 @@ def labels_episode(ep_dir: str, cfg: dict, replay: GymReplay) -> dict:
     df = df.merge(raw, on='t')
     out['rows'] = len(df)
     out['y_ds_over_expected'] = _median(df['y_ds_1'] / df['exp_ds_0'])
+    # the same comparison on a wall-clock grid, as datasets were sampled before simulated time
+    wall = gt_on_grid(opp_odom, np.arange(grid[0], grid[-1], int(round(dt * 1e9)), dtype=np.int64), ref)
+    out['wall_clock_y_ds_over_expected'] = step_over_velocity(wall['s_unwrapped'], _sdot(wall, ref), dt)
     out['y_ds_error_m'] = _stats((df['y_ds_1'] - df['exp_ds_0']).to_numpy())
     out['y_dd_error_m'] = _stats((df['y_dd_1'] - df['exp_dd_0']).to_numpy())
     rmse = {j: float(np.sqrt(np.nanmean((df['y_ds_1'] - df[f'exp_ds_{j}'])**2 + (df['y_dd_1'] - df[f'exp_dd_{j}'])**2)))
@@ -432,7 +458,7 @@ def check_labels(run_dir: str, dataset_override: dict = None) -> dict:
 def print_labels(report: dict):
     fmt = lambda v, f='{:6.3f}': '     -' if v is None else f.format(v)
     print("State labels vs recorded velocities (x from the ground truth):")
-    print(f"  {'ep':8s} {'policy':24s} {'rows':>4s} {'steps/s':>7s} {'y_ds/exp':>8s} {'ds rmse':>7s} {'dd rmse':>7s} "
+    print(f"  {'ep':8s} {'policy':24s} {'rows':>4s} {'steps/s':>7s} {'y_ds/exp':>8s} {'wall clock':>10s} {'ds rmse':>7s} {'dd rmse':>7s} "
           f"{'best shift':>10s}  rmse at shift -3..+3")
     for name, e in report['episodes'].items():
         if not e.get('rows'):
@@ -440,7 +466,8 @@ def print_labels(report: dict):
             continue
         shifts = ' '.join(f"{v:.3f}" for v in e['label_shift_rmse_m'].values())
         print(f"  {name:8s} {e['opp_policy']:24s} {e['rows']:4d} {e['physics_steps_per_s']:7.1f} "
-              f"{fmt(e['y_ds_over_expected'], '{:8.3f}')} {fmt(e['y_ds_error_m']['rmse'], '{:7.4f}')} "
+              f"{fmt(e['y_ds_over_expected'], '{:8.3f}')} {fmt(e.get('wall_clock_y_ds_over_expected'), '{:10.3f}')} "
+              f"{fmt(e['y_ds_error_m']['rmse'], '{:7.4f}')} "
               f"{fmt(e['y_dd_error_m']['rmse'], '{:7.4f}')} {e['best_shift']:+10d}  {shifts}")
     print("\nAction labels replayed through the gym model, position error [m] median / p95 (constant velocity for scale):")
     print(f"  {'ep':8s} {'policy':24s} " + ' '.join(f"{h:>9.2f} s replay {'':>4s} const vel" for h in HORIZONS_S))

@@ -92,7 +92,7 @@ Contract: opponent nodes live in `/opp_racecar` and publish `/opp_drive`; the eg
 |---|---|---|
 | `perception` | Is the pipeline or the ego's perception the problem? | detector and tracker vs ground truth per grid step; dataset built twice (x from tracker / from ground truth) |
 | `policies` | Do the values match the opponent policies? | python policies replayed from the recorded state; motion vs sampled parameters |
-| `labels` | Do the labels match the raw recording? | state labels vs recorded velocities (also time-shifted); action labels replayed through the gym model |
+| `labels` | Do the labels match the raw recording? | state labels vs recorded velocities (also time-shifted, and on a wall-clock grid for comparison); action labels replayed through the gym model |
 
 [specs/known_answer.yaml](specs/known_answer.yaml) records opponents with fixed, known parameters for `policies`.
 
