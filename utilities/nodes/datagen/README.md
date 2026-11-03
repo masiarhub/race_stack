@@ -7,6 +7,7 @@ ros2 run datagen mine utilities/nodes/datagen/specs/h2h_v1.yaml              # w
 ros2 run datagen mine utilities/nodes/datagen/specs/h2h_v1.yaml --headless   # no GUI
 ros2 run datagen mine <spec> --dry-run                    # print the episode plan only
 ros2 run datagen extract data/h2h_v1/<run>/ --spec other.yaml --name v2.csv   # new features, no re-simulation
+ros2 run datagen check perception|policies|labels data/h2h_v1/<run>/          # sanity checks, see below
 ```
 
 ```
@@ -41,6 +42,10 @@ Every episode is a fresh launch of the whole stack (no state carries over).
    Not ready within `startup_timeout_s` -> `startup_failed`, retried with the same plan.
 3. t = 0 when the gate opens. The first `warmup_s` are dropped at extraction.
 
+All times of a dataset (`t`, `dt`, `warmup_s`, `drop_before_collision_s`) are simulated time. The gym advances the
+physics on a 10 ms wall-clock timer and falls behind when the computer is loaded, so extraction counts simulated
+time in physics steps (`/sim/collisions` is published once per step) instead of using the wall clock.
+
 **End** (first one wins, stored in `result.json`)
 
 | reason | condition | valid |
@@ -53,10 +58,12 @@ Every episode is a fresh launch of the whole stack (no state carries over).
 | `decoupled` | \|Δs\| > `decouple.gap_m` for `decouple.duration_s` (optional) | yes |
 | `policy_changed` | a node in `/opp_racecar` changed a parameter after t = 0 | no |
 | `stale_input` | a required topic silent for `stale_input_s` | no |
+| `sim_too_slow` | fewer than `min_physics_rate_hz` physics steps per wall-clock second (checked at the end, original reason in `detail`) | no |
 | `startup_failed` / `aborted` | see above / launch died | no |
 
 Reproducibility: same spec + seed + commit give the same plan and rules. Trajectories are not bit-identical,
-since the simulator steps on a wall-clock timer and nodes run asynchronously.
+since the simulator steps on a wall-clock timer and nodes run asynchronously. The stacks run on the wall clock too,
+so a slow simulator changes their behaviour relative to the physics; `sim_too_slow` keeps such episodes out.
 
 ## Policies
 
@@ -76,3 +83,28 @@ Contract: opponent nodes live in `/opp_racecar` and publish `/opp_drive`; the eg
 - One opponent: the gym bridge supports `num_agent` <= 2.
 - Frenet frame on tight corners: where κ·d approaches 1 (car near/past the centre of curvature) s is not unique.
   These samples are dropped (`frenet_singular_kappa_d`) and counted in `_report.json`.
+
+## Checks
+
+`ros2 run datagen check <test> <run_dir>` writes `check_<test>.json` into the run folder.
+
+| test | question | method |
+|---|---|---|
+| `perception` | Is the pipeline or the ego's perception the problem? | detector and tracker vs ground truth per grid step; dataset built twice (x from tracker / from ground truth) |
+| `policies` | Do the values match the opponent policies? | python policies replayed from the recorded state; motion vs sampled parameters |
+| `labels` | Do the labels match the raw recording? | state labels vs recorded velocities (also time-shifted); action labels replayed through the gym model |
+
+[specs/known_answer.yaml](specs/known_answer.yaml) records opponents with fixed, known parameters for `policies`.
+
+## Terms
+
+| term | meaning |
+|---|---|
+| spec | experiment file: tracks, ego, opponent policies, episode rules, dataset representation |
+| run | one `mine` call: a folder with all episodes of a spec |
+| episode | one fresh launch from start gate to end reason; `episode.json` is its plan, `result.json` its outcome |
+| policy | the driver of a car (launch file or python class), frozen for the whole episode |
+| physics step | one 10 ms step of the gym; simulated time = number of steps x 10 ms |
+| grid | the sample times of an episode, every `dt` of simulated time |
+| row | one grid time of one episode in `dataset.csv`: meta columns, features x, labels y |
+
