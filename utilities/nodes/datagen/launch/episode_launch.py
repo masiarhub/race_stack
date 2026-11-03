@@ -76,6 +76,10 @@ def launch_setup(context):
         cmd=['ros2', 'bag', 'record', '-o', os.path.join(ep_dir, 'bag')] + ep['record_topics'],
         output='log')
 
+    # perfect perception for the ego: the true opponent on /perception/obstacles instead of detection and tracking
+    perception = [Node(package='datagen', executable='gt_obstacles', name='gt_obstacles', output='screen',
+                       parameters=[{'map_dir': ep['map_dir']}])] if ep['ego_policy'].get('ground_truth_obstacles') else []
+
     manager = Node(
         package='datagen', executable='episode_manager', name='episode_manager', output='screen',
         parameters=[{'episode_file': ep_file, 'result_file': os.path.join(ep_dir, 'result.json')}])
@@ -83,6 +87,7 @@ def launch_setup(context):
     return [
         recorder,
         base_system,
+        *perception,
         *policy_actions(ep['ego_policy'], 'ego', ep, ep_dir),
         *policy_actions(ep['opp_policy'], 'opp', ep, ep_dir),
         manager,

@@ -29,7 +29,8 @@ Any value in `episode` or a policy file can be a distribution: `{uniform: [lo, h
 The `dataset` section is applied offline (see `datagen/extract.py` for defaults and `datagen/features.py` for the
 catalog): `frame: frenet|cartesian`, `reference: centerline|raceline|shortest_path`, `opp_source: tracker|gt`,
 `features`, `labels: {type: state_delta|state|action, horizon: N}`, `history: H`.
-x is built from the ego's tracker estimate, y from simulator ground truth.
+x is built from the ego's tracker estimate (`opp_source: tracker`) or from the simulator (`gt`, used by
+`h2h_v1`), y always from simulator ground truth.
 
 ## Rules of one episode
 
@@ -77,6 +78,16 @@ It is resolved (sampled) once per episode and frozen; its hash is stored per epi
   Run by `policy_runner` with read-only parameters.
 
 Contract: opponent nodes live in `/opp_racecar` and publish `/opp_drive`; the ego publishes `/drive`.
+
+Perfect perception for the ego: an ego policy with `ground_truth_obstacles: true` (and its own detection and
+tracking off) gets the true opponent on `/perception/obstacles` from datagen's `gt_obstacles` node, in the
+tracker's format and frame. [ego_h2h_spliner_gt.yaml](policies/ego_h2h_spliner_gt.yaml) is the race stack
+head-to-head stack in this mode; [ego_h2h_spliner.yaml](policies/ego_h2h_spliner.yaml) keeps the real perception.
+
+Ego perception: `ground_truth_obstacles: true` in an ego policy starts datagen's `gt_obstacles` node, which publishes
+the true opponent on `/perception/obstacles` in the tracker's format, so the ego reacts as if perception were perfect.
+[ego_h2h_spliner_gt.yaml](policies/ego_h2h_spliner_gt.yaml) uses it and turns the race stack's detection and tracking
+off (`perception: 'False'`); [ego_h2h_spliner.yaml](policies/ego_h2h_spliner.yaml) keeps them, e.g. for `check perception`.
 
 ## Limits
 

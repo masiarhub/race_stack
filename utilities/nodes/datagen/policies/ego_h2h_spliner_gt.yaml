@@ -1,0 +1,11 @@
+# Ego: the race stack head-to-head stack with perfect perception. Detection and tracking are off, datagen's
+# gt_obstacles node publishes the true opponent on /perception/obstacles in the tracker's format.
+name: ego_h2h_spliner_gt
+kind: launch
+launch: {package: stack_master, file: head_to_head_launch.xml}
+args:
+  ctrl_algo: MAP
+  overtake_mode: spliner
+  perception: 'False'
+ground_truth_obstacles: true
+ready_topics: [/perception/obstacles]

@@ -100,6 +100,8 @@ def validate(spec: dict):
                 pdef = load_policy_def(find_policy_file(ref, spec_dir))
                 if role == 'ego' and pdef['kind'] != 'launch':
                     errors.append(f"ego policy {ref}: only launch policies can drive the ego for now")
+                if role == 'opp' and pdef['ground_truth_obstacles']:
+                    errors.append(f"opponent policy {ref}: ground_truth_obstacles feeds the ego's perception topic")
             except (FileNotFoundError, ValueError) as e:
                 errors.append(str(e))
     if errors:

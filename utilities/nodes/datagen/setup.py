@@ -30,6 +30,7 @@ setup(
             'check = datagen.cli:check',
             'episode_manager = datagen.episode_manager:main',
             'policy_runner = datagen.policy_runner:main',
+            'gt_obstacles = datagen.gt_obstacles:main',
         ],
     },
 )

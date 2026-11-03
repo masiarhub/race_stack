@@ -16,6 +16,9 @@ Two kinds:
 
 Contract for an opponent policy: its nodes live in /opp_racecar and it publishes
 AckermannDriveStamped on /opp_drive. An ego policy publishes on /drive.
+
+`ground_truth_obstacles: true` (ego policies only): datagen's gt_obstacles node publishes the true opponent on
+/perception/obstacles. The policy must then not run its own detection and tracking (e.g. perception: false).
 """
 import dataclasses
 import hashlib
@@ -70,6 +73,7 @@ def load_policy_def(path: str) -> dict:
     pdef.setdefault('name', os.path.splitext(os.path.basename(path))[0])
     pdef.setdefault('params', {})
     pdef.setdefault('ready_topics', [])
+    pdef.setdefault('ground_truth_obstacles', False)
     if pdef.get('kind') not in KINDS:
         raise ValueError(f"{path}: kind must be one of {KINDS}")
     if pdef['kind'] == 'launch':
@@ -93,6 +97,8 @@ def resolve_policy(pdef: dict, rng: np.random.Generator) -> dict:
         'ready_topics': list(pdef['ready_topics']),
         'params': sample(pdef['params'], rng),
     }
+    if pdef['ground_truth_obstacles']:  # only when set, so the hashes of all other policies stay as they were
+        resolved['ground_truth_obstacles'] = True
     sources = [pdef['source_file']]
     if pdef['kind'] == 'launch':
         resolved['launch'] = dict(pdef['launch'])
