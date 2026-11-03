@@ -51,6 +51,7 @@ class EpisodeManager(Node):
         self.last_rx = {}  # topic -> last receive time [s]
         self.odom = {}     # topic -> latest Odometry
         self.collided = [False, False]
+        self.physics_steps = 0  # the bridge publishes /sim/collisions once per physics step after the start
         self.policy_change = None
         self.ego_progress = 0.0
         self.ego_s_prev = None
@@ -84,6 +85,7 @@ class EpisodeManager(Node):
 
     def collision_cb(self, msg):
         if self.phase == 'running':
+            self.physics_steps += 1
             # sticky, a one step contact between two ticks must not be missed
             self.collided = [a or bool(b) for a, b in zip(self.collided, msg.data)]
 
@@ -205,6 +207,13 @@ class EpisodeManager(Node):
         self.done = True
         self.phase = 'done'
         t_end_ns = self.get_clock().now().nanoseconds
+        duration_s = (t_end_ns - self.t0_ns) * 1e-9 if self.t0 is not None else 0.0
+        # the gym steps on a wall-clock timer: under load simulated time falls behind, and the stacks, which run on
+        # the wall clock, then act faster relative to the physics than they would on the car
+        rate = self.physics_steps / duration_s if duration_s > 0 else None
+        if valid and rate is not None and rate < self.rules['min_physics_rate_hz']:
+            detail = f"{rate:.1f} physics steps/s, ended by {reason}" + (f" ({detail})" if detail else '')
+            reason, valid = 'sim_too_slow', False
         result = {
             'episode': self.ep['name'],
             'valid': valid,
@@ -212,7 +221,8 @@ class EpisodeManager(Node):
             'detail': detail,
             't0_ns': self.t0_ns if self.t0 is not None else None,
             't_end_ns': t_end_ns,
-            'duration_s': (t_end_ns - self.t0_ns) * 1e-9 if self.t0 is not None else 0.0,
+            'duration_s': duration_s,
+            'physics_steps_per_s': round(rate, 1) if rate is not None else None,
             'startup_s': (self.t0 if self.t0 is not None else self.now()) - self.t_launch,
             'ego_progress_m': self.ego_progress,
             'ego_laps': self.ego_progress / self.centerline.length,

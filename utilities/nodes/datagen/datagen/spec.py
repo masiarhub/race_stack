@@ -27,6 +27,7 @@ EPISODE_DEFAULTS = {
     'off_track_margin_m': 0.3,      # beyond the track bounds by more than this ends the episode
     'decouple': {'gap_m': 15.0, 'duration_s': 5.0},  # null disables it
     'stale_input_s': 1.0,           # a required topic silent this long after t=0 invalidates the episode
+    'min_physics_rate_hz': 95.0,    # fewer physics steps per wall-clock second invalidate the episode (100 = real time)
     'max_retries': 2,               # only for startup failures, with the same seed
 }
 
