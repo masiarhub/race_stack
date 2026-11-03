@@ -34,5 +34,5 @@ dataset:                     # applied offline by `ros2 run datagen extract`, no
     - opp_vel                # vs, vd
     - ego_vel
     - curvature: {n: 10, step_m: 0.5}
-  labels: {type: state_delta, horizon: 1}   # state_delta | state | action
+  labels: {type: action, horizon: 1}   # state_delta | state | action
   history: 1
