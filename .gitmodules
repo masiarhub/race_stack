@@ -8,7 +8,7 @@
 	branch = humble
 [submodule "base_system/f110_simulator/f1tenth_gym_ros"]
 	path = base_system/f110_simulator/f1tenth_gym_ros
-	url = https://github.com/ForzaETH/f1tenth_gym_ros.git
+	url = https://github.com/masiarhub/f1tenth_gym_ros.git
 	branch = humble
 [submodule "planner/global_planner/global_planner/global_racetrajectory_optimization"]
 	path = planner/global_planner/global_planner/global_racetrajectory_optimization
