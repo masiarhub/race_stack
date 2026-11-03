@@ -325,6 +325,8 @@ def _sdot(gt: dict, ref: Track) -> np.ndarray:
 def _shifted(a, j):
     """a[k + j] at index k, NaN outside."""
     out = np.full(len(a), np.nan)
+    if abs(j) >= len(a):
+        return out
     if j >= 0:
         out[:len(a) - j] = a[j:]
     else:
