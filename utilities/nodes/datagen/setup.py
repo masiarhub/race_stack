@@ -27,6 +27,7 @@ setup(
         'console_scripts': [
             'mine = datagen.cli:mine',
             'extract = datagen.cli:extract',
+            'check = datagen.cli:check',
             'episode_manager = datagen.episode_manager:main',
             'policy_runner = datagen.policy_runner:main',
         ],

@@ -164,6 +164,16 @@ def columns_of(entries, ctx, registry, prefix):
     return cols
 
 
+def episode_grid(ep: dict, result: dict, cfg: dict) -> np.ndarray:
+    """Sample times [ns]: from the end of the warm-up to the end of the episode (minus the last moments before a collision)."""
+    dt_ns = int(round(cfg['dt'] * 1e9))
+    t_start = result['t0_ns'] + int(ep['rules']['warmup_s'] * 1e9)
+    t_stop = result['t_end_ns']
+    if result['reason'] == 'collision':
+        t_stop -= int(cfg['drop_before_collision_s'] * 1e9)
+    return np.arange(t_start, t_stop, dt_ns, dtype=np.int64)
+
+
 def episode_table(ep_dir: str, cfg: dict):
     with open(os.path.join(ep_dir, 'episode.json')) as f:
         ep = json.load(f)
@@ -177,12 +187,7 @@ def episode_table(ep_dir: str, cfg: dict):
                                                  '/perception/obstacles', '/drive', '/opp_drive'])
     ego_odom, opp_odom = odom_arrays(bag['/state_estimation/odom']), odom_arrays(bag['/opp_racecar/odom'])
 
-    dt_ns = int(round(cfg['dt'] * 1e9))
-    t_start = result['t0_ns'] + int(ep['rules']['warmup_s'] * 1e9)
-    t_stop = result['t_end_ns']
-    if result['reason'] == 'collision':
-        t_stop -= int(cfg['drop_before_collision_s'] * 1e9)
-    grid = np.arange(t_start, t_stop, dt_ns, dtype=np.int64)
+    grid = episode_grid(ep, result, cfg)
     if grid.size == 0:
         return None, [], {'rows': 0, 'note': 'episode shorter than the warm-up'}
 

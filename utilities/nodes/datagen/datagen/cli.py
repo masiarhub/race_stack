@@ -3,6 +3,7 @@ Command line entry points.
 
     ros2 run datagen mine <spec.yaml> [--headless] [--episodes N] [--out DIR] [--dry-run] [--no-extract]
     ros2 run datagen extract <run_dir> [--spec other.yaml] [--name dataset.csv]
+    ros2 run datagen check perception|policies <run_dir> [--spec other.yaml]
 
 Output of `mine`:
     <out>/<spec name>/<timestamp>/
@@ -154,3 +155,19 @@ def extract(argv=None):
         with open(args.spec) as f:
             override = yaml.safe_load(f).get('dataset', {})
     print(f"Dataset: {extract_run(args.run_dir, override, args.name)}")
+
+
+def check(argv=None):
+    from datagen import checks
+    parser = argparse.ArgumentParser(prog='ros2 run datagen check', description='Sanity checks of a recorded run.')
+    parser.add_argument('test', choices=['perception', 'policies'])
+    parser.add_argument('run_dir')
+    parser.add_argument('--spec', help='take the dataset section from this spec instead of the recorded one')
+    args = parser.parse_args(argv)
+    override = None
+    if args.spec:
+        with open(args.spec) as f:
+            override = yaml.safe_load(f).get('dataset', {})
+    report = getattr(checks, f'check_{args.test}')(args.run_dir, override)
+    getattr(checks, f'print_{args.test}')(report)
+    print(f"\nReport: {os.path.join(args.run_dir, f'check_{args.test}.json')}")
