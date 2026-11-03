@@ -34,8 +34,9 @@ DATASET_DEFAULTS = {
 
 # the race stack tracker works in the Frenet frame of /global_waypoints, i.e. the min curvature raceline
 TRACKER_LINE = 'raceline'
-# after the start gate the bridge advances the physics once per tick and publishes this topic once per tick
-PHYSICS_STEP_TOPIC = '/sim/collisions'
+# after the start gate the bridge advances the physics once per tick and publishes these once per tick;
+# /sim/collisions is the combined collision topic of runs recorded before the car / wall split
+PHYSICS_STEP_TOPICS = ('/sim/collision/walls', '/sim/collisions')
 PHYSICS_DT_S = 0.01  # [s] physics time step of the gym
 
 
@@ -205,15 +206,23 @@ def time_grid(t0_ns: int, t_end_ns: int, step_ns, dt: float, warmup_s: float, cu
     return Grid(np.round(np.interp(t_s, sim, wall)).astype(np.int64), t_s)
 
 
+def physics_steps_ns(bag: dict) -> np.ndarray:
+    """Recording times of the physics steps (ticks) of an episode."""
+    for topic in PHYSICS_STEP_TOPICS:
+        if bag.get(topic):
+            return np.array([m[0] for m in bag[topic]], dtype=np.int64)
+    return np.zeros(0, dtype=np.int64)
+
+
 def load_episode(ep_dir: str, cfg: dict, topics: list) -> Episode:
     """Plan, result, the requested bag topics and the sample grid of one recorded episode."""
     with open(os.path.join(ep_dir, 'episode.json')) as f:
         plan = json.load(f)
     with open(os.path.join(ep_dir, 'result.json')) as f:
         result = json.load(f)
-    bag = read_bag(os.path.join(ep_dir, 'bag'), list(dict.fromkeys([*topics, PHYSICS_STEP_TOPIC])))
+    bag = read_bag(os.path.join(ep_dir, 'bag'), list(dict.fromkeys([*topics, *PHYSICS_STEP_TOPICS])))
     cut_end_s = cfg['drop_before_collision_s'] if result['reason'] == 'collision' else 0.0
-    grid = time_grid(result['t0_ns'], result['t_end_ns'], [m[0] for m in bag[PHYSICS_STEP_TOPIC]],
+    grid = time_grid(result['t0_ns'], result['t_end_ns'], physics_steps_ns(bag),
                      cfg['dt'], plan['rules']['warmup_s'], cut_end_s)
     return Episode(plan['name'], plan, result, bag, grid)
 

@@ -53,3 +53,12 @@ def test_episode_shorter_than_warmup_gives_empty_grid():
     step_ns = steps(50, 10.0)
     g = time_grid(T0, step_ns[-1], step_ns, dt=0.05, warmup_s=2.0, cut_end_s=0.0)
     assert g.t_s.size == 0 and g.wall_ns.size == 0
+
+
+def test_physics_steps_come_from_the_wall_topic_or_the_older_combined_topic():
+    from datagen.extract import physics_steps_ns
+    new = {'/sim/collision/walls': [(5, None), (7, None)], '/sim/collisions': []}
+    old = {'/sim/collision/walls': [], '/sim/collisions': [(1, None), (2, None), (3, None)]}
+    assert physics_steps_ns(new).tolist() == [5, 7]
+    assert physics_steps_ns(old).tolist() == [1, 2, 3]
+    assert physics_steps_ns({}).size == 0

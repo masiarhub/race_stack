@@ -13,8 +13,8 @@ import numpy as np
 import pandas as pd
 import yaml
 
-from datagen.extract import (PHYSICS_DT_S, PHYSICS_STEP_TOPIC, TRACKER_LINE, dataset_config, episode_table,
-                             gt_on_grid, load_episode, odom_arrays)
+from datagen.extract import (PHYSICS_DT_S, TRACKER_LINE, dataset_config, episode_table, gt_on_grid,
+                             load_episode, odom_arrays, physics_steps_ns)
 from datagen.policy import Obs, _sha256, load_policy_class, state_from_odom
 from datagen.track import LINE_KEYS, Track
 
@@ -355,7 +355,7 @@ def labels_episode(ep_dir: str, cfg: dict, replay: GymReplay) -> dict:
     opp_odom = odom_arrays(bag['/opp_racecar/odom'])
 
     # physics steps per second of wall-clock time
-    t_step = np.array([m[0] for m in bag[PHYSICS_STEP_TOPIC]], dtype=np.int64)
+    t_step = physics_steps_ns(bag)
     in_ep = (t_step >= grid[0]) & (t_step <= grid[-1])
     out['physics_steps_per_s'] = round(float(in_ep.sum() / ((grid[-1] - grid[0]) * 1e-9)), 1)
 

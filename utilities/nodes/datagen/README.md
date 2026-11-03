@@ -44,7 +44,7 @@ Every episode is a fresh launch of the whole stack (no state carries over).
 
 All times of a dataset (`t`, `dt`, `warmup_s`, `drop_before_collision_s`) are simulated time. The gym advances the
 physics on a 10 ms wall-clock timer and falls behind when the computer is loaded, so extraction counts simulated
-time in physics steps (`/sim/collisions` is published once per step) instead of using the wall clock.
+time in physics steps (`/sim/collision/walls` is published once per step) instead of using the wall clock.
 
 **End** (first one wins, stored in `result.json`)
 
@@ -52,7 +52,7 @@ time in physics steps (`/sim/collisions` is published once per step) instead of 
 |---|---|---|
 | `laps_done` | ego progress >= `laps` * L | yes |
 | `timeout` | t > `timeout_s` | yes |
-| `collision` | gym collision flag of either car (car-car or wall) | yes, last `drop_before_collision_s` dropped |
+| `collision` | the cars overlap (`/sim/collision/cars`) or a car touches a wall (`/sim/collision/walls`); `detail` says which | yes, last `drop_before_collision_s` dropped |
 | `stall` | a car slower than `stall.speed_mps` for `stall.duration_s` after warm-up | yes |
 | `off_track` | \|d\| beyond the track bounds by `off_track_margin_m` | yes |
 | `decoupled` | \|Δs\| > `decouple.gap_m` for `decouple.duration_s` (optional) | yes |

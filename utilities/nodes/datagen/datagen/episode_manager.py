@@ -13,7 +13,7 @@ from rosidl_runtime_py.utilities import get_message
 from ackermann_msgs.msg import AckermannDriveStamped
 from nav_msgs.msg import Odometry
 from rcl_interfaces.msg import ParameterEvent
-from std_msgs.msg import Empty, String, UInt8MultiArray
+from std_msgs.msg import Bool, Empty, String, UInt8MultiArray
 
 from datagen.track import Track
 
@@ -50,8 +50,8 @@ class EpisodeManager(Node):
 
         self.last_rx = {}  # topic -> last receive time [s]
         self.odom = {}     # topic -> latest Odometry
-        self.collided = [False, False]
-        self.physics_steps = 0  # the bridge publishes /sim/collisions once per physics step after the start
+        self.collisions = set()  # sticky: 'car-car', 'ego-wall', 'opp-wall'
+        self.physics_steps = 0   # the bridge publishes /sim/collision/walls once per physics step after the start
         self.policy_change = None
         self.ego_progress = 0.0
         self.ego_s_prev = None
@@ -62,7 +62,8 @@ class EpisodeManager(Node):
             self.create_subscription(Odometry, topic, lambda m, t=topic: self.odom_cb(t, m), 10)
         for topic in ('/drive', '/opp_drive'):
             self.create_subscription(AckermannDriveStamped, topic, lambda m, t=topic: self.touch(t), 10)
-        self.create_subscription(UInt8MultiArray, '/sim/collisions', self.collision_cb, 10)
+        self.create_subscription(Bool, '/sim/collision/cars', self.car_collision_cb, 10)
+        self.create_subscription(UInt8MultiArray, '/sim/collision/walls', self.wall_collision_cb, 10)
         self.create_subscription(ParameterEvent, '/parameter_events', self.param_event_cb, 100)
         # policy specific readiness topics (e.g. the ego tracker), their type is only known once published
         self.extra_ready = sorted(set(self.ep['ego_policy']['ready_topics'] + self.ep['opp_policy']['ready_topics']))
@@ -83,11 +84,15 @@ class EpisodeManager(Node):
         self.odom[topic] = msg
         self.touch(topic)
 
-    def collision_cb(self, msg):
+    # sticky, a one step contact between two ticks must not be missed
+    def car_collision_cb(self, msg):
+        if self.phase == 'running' and msg.data:
+            self.collisions.add('car-car')
+
+    def wall_collision_cb(self, msg):
         if self.phase == 'running':
             self.physics_steps += 1
-            # sticky, a one step contact between two ticks must not be missed
-            self.collided = [a or bool(b) for a, b in zip(self.collided, msg.data)]
+            self.collisions |= {f'{car}-wall' for car, flag in zip(('ego', 'opp'), msg.data) if flag}
 
     def param_event_cb(self, msg):
         if self.phase == 'running' and msg.node.startswith(OPP_NAMESPACE + '/') \
@@ -169,9 +174,8 @@ class EpisodeManager(Node):
         for topic in REQUIRED:
             if now - self.last_rx.get(topic, 0.0) > r['stale_input_s']:
                 return self.finish('stale_input', valid=False, detail=topic)
-        if any(self.collided):
-            who = [n for n, c in zip(('ego', 'opp'), self.collided) if c]
-            return self.finish('collision', detail=f"{who}")
+        if self.collisions:
+            return self.finish('collision', detail=', '.join(sorted(self.collisions)))
 
         (s_ego, d_ego), (s_opp, d_opp) = self.frenet(EGO_ODOM), self.frenet(OPP_ODOM)
         if self.ego_s_prev is not None:

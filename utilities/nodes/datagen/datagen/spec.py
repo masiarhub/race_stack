@@ -42,7 +42,8 @@ RECORD_TOPICS = [
     '/car_state/frenet/odom',       # ego Frenet odom (raceline) of the stack
     '/state',                       # ego state machine (e.g. trailing / overtaking)
     '/opp_racecar/state',           # opponent state machine (launch policies of the race stack only)
-    '/sim/collisions',
+    '/sim/collision/cars',          # the two car bodies overlap
+    '/sim/collision/walls',         # [ego, opp] touches the environment, one message per physics step
     '/datagen/events',
     '/parameter_events',
 ]
