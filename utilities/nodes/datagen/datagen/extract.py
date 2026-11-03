@@ -5,8 +5,10 @@ Rules: x is built from what the ego can know (tracker estimate of the opponent, 
 simulator ground truth. Rows in the warm-up, past the end of the episode or with any missing value are dropped.
 """
 import copy
+import dataclasses
 import json
 import os
+from typing import NamedTuple
 
 import numpy as np
 import pandas as pd
@@ -16,7 +18,7 @@ from datagen.features import FEATURES, LABELS, Context, parse_entry
 from datagen.track import Track, body_to_map, unwrap_s
 
 DATASET_DEFAULTS = {
-    'dt': 0.05,                  # [s] time grid of the samples
+    'dt': 0.05,                  # [s] simulated time between two samples
     'frame': 'frenet',           # frenet | cartesian
     'reference': 'centerline',   # Frenet reference: centerline | raceline | shortest_path
     'opp_source': 'tracker',     # x uses the ego's tracker estimate (tracker) or the sim ground truth (gt)
@@ -32,6 +34,9 @@ DATASET_DEFAULTS = {
 
 # the race stack tracker works in the Frenet frame of /global_waypoints, i.e. the min curvature raceline
 TRACKER_LINE = 'raceline'
+# after the start gate the bridge advances the physics once per tick and publishes this topic once per tick
+PHYSICS_STEP_TOPIC = '/sim/collisions'
+PHYSICS_DT_S = 0.01  # [s] physics time step of the gym
 
 
 def dataset_config(spec_dataset: dict) -> dict:
@@ -79,7 +84,8 @@ def odom_arrays(msgs) -> dict:
             'y': np.array([x.position.y for x in p]),
             'yaw': np.unwrap(yaw),
             'vx_b': np.array([m[1].twist.twist.linear.x for m in msgs]),
-            'vy_b': np.array([m[1].twist.twist.linear.y for m in msgs])}
+            'vy_b': np.array([m[1].twist.twist.linear.y for m in msgs]),
+            'wz': np.array([m[1].twist.twist.angular.z for m in msgs])}
 
 
 def drive_zoh(msgs, grid) -> dict:
@@ -164,30 +170,62 @@ def columns_of(entries, ctx, registry, prefix):
     return cols
 
 
-def episode_grid(ep: dict, result: dict, cfg: dict) -> np.ndarray:
-    """Sample times [ns]: from the end of the warm-up to the end of the episode (minus the last moments before a collision)."""
-    dt_ns = int(round(cfg['dt'] * 1e9))
-    t_start = result['t0_ns'] + int(ep['rules']['warmup_s'] * 1e9)
-    t_stop = result['t_end_ns']
-    if result['reason'] == 'collision':
-        t_stop -= int(cfg['drop_before_collision_s'] * 1e9)
-    return np.arange(t_start, t_stop, dt_ns, dtype=np.int64)
+class Grid(NamedTuple):
+    """Sample times of one episode, equally spaced in simulated time."""
+    wall_ns: np.ndarray  # recording-clock times at which messages are looked up
+    t_s: np.ndarray      # simulated time since the start gate [s]
+
+
+@dataclasses.dataclass
+class Episode:
+    """One recorded episode, as everything downstream of the recording sees it."""
+    name: str
+    plan: dict    # episode.json
+    result: dict  # result.json
+    bag: dict     # topic -> [(recording time ns, msg)]
+    grid: Grid
+
+
+def time_grid(t0_ns: int, t_end_ns: int, step_ns, dt: float, warmup_s: float, cut_end_s: float) -> Grid:
+    """
+    One sample every dt of simulated time, from warmup_s after the start gate to cut_end_s before the end.
+    The gym steps on a wall-clock timer and falls behind under load, so simulated time is counted in physics
+    steps (step_ns: their recording times, PHYSICS_DT_S each). Without any step the wall clock is used instead.
+    """
+    steps = np.asarray(step_ns, dtype=np.int64)
+    steps = steps[(steps > t0_ns) & (steps <= t_end_ns)]
+    if steps.size:
+        wall = np.concatenate([[t0_ns], steps]).astype(float)
+        sim = np.arange(steps.size + 1) * PHYSICS_DT_S
+    else:
+        wall = np.array([t0_ns, t_end_ns], dtype=float)
+        sim = (wall - t0_ns) * 1e-9
+    n = max(0, int(np.ceil((sim[-1] - cut_end_s - warmup_s) / dt - 1e-9)))
+    t_s = warmup_s + np.arange(n) * dt
+    return Grid(np.round(np.interp(t_s, sim, wall)).astype(np.int64), t_s)
+
+
+def load_episode(ep_dir: str, cfg: dict, topics: list) -> Episode:
+    """Plan, result, the requested bag topics and the sample grid of one recorded episode."""
+    with open(os.path.join(ep_dir, 'episode.json')) as f:
+        plan = json.load(f)
+    with open(os.path.join(ep_dir, 'result.json')) as f:
+        result = json.load(f)
+    bag = read_bag(os.path.join(ep_dir, 'bag'), list(dict.fromkeys([*topics, PHYSICS_STEP_TOPIC])))
+    cut_end_s = cfg['drop_before_collision_s'] if result['reason'] == 'collision' else 0.0
+    grid = time_grid(result['t0_ns'], result['t_end_ns'], [m[0] for m in bag[PHYSICS_STEP_TOPIC]],
+                     cfg['dt'], plan['rules']['warmup_s'], cut_end_s)
+    return Episode(plan['name'], plan, result, bag, grid)
 
 
 def episode_table(ep_dir: str, cfg: dict):
-    with open(os.path.join(ep_dir, 'episode.json')) as f:
-        ep = json.load(f)
-    with open(os.path.join(ep_dir, 'result.json')) as f:
-        result = json.load(f)
+    episode = load_episode(ep_dir, cfg, ['/state_estimation/odom', '/opp_racecar/odom', '/perception/obstacles',
+                                         '/drive', '/opp_drive'])
+    ep, bag, grid = episode.plan, episode.bag, episode.grid.wall_ns
     wpnts = os.path.join(ep['map_dir'], 'global_waypoints.json')
     ref = Track.from_json(wpnts, cfg['reference'])
     tracker_line = Track.from_json(wpnts, TRACKER_LINE)
-
-    bag = read_bag(os.path.join(ep_dir, 'bag'), ['/state_estimation/odom', '/opp_racecar/odom',
-                                                 '/perception/obstacles', '/drive', '/opp_drive'])
     ego_odom, opp_odom = odom_arrays(bag['/state_estimation/odom']), odom_arrays(bag['/opp_racecar/odom'])
-
-    grid = episode_grid(ep, result, cfg)
     if grid.size == 0:
         return None, [], {'rows': 0, 'note': 'episode shorter than the warm-up'}
 
@@ -214,7 +252,7 @@ def episode_table(ep_dir: str, cfg: dict):
             ('track', ep['track'], '', 'map name'),
             ('opp_policy', opp_pol['name'], '', 'opponent policy definition'),
             ('opp_policy_hash', opp_pol['policy_hash'], '', 'hash of the resolved (sampled) policy'),
-            ('t', (grid - result['t0_ns']) * 1e-9, 's', 'time since the start gate opened')]
+            ('t', episode.grid.t_s, 's', 'simulated time since the start gate opened')]
     df = pd.DataFrame({name: values for name, values, _, _ in meta + x_cols + y_cols})
     data_cols = [c[0] for c in x_cols + y_cols]
     n_all = len(df)

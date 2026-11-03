@@ -13,8 +13,8 @@ import numpy as np
 import pandas as pd
 import yaml
 
-from datagen.extract import (TRACKER_LINE, dataset_config, episode_grid, episode_table, gt_on_grid,
-                             odom_arrays, read_bag)
+from datagen.extract import (PHYSICS_DT_S, PHYSICS_STEP_TOPIC, TRACKER_LINE, dataset_config, episode_table,
+                             gt_on_grid, load_episode, odom_arrays)
 from datagen.policy import Obs, _sha256, load_policy_class, state_from_odom
 from datagen.track import LINE_KEYS, Track
 
@@ -64,15 +64,11 @@ def _stats(err):
 
 
 def perception_episode(ep_dir: str, cfg: dict) -> dict:
-    with open(os.path.join(ep_dir, 'episode.json')) as f:
-        ep = json.load(f)
-    with open(os.path.join(ep_dir, 'result.json')) as f:
-        result = json.load(f)
-    grid = episode_grid(ep, result, cfg)
+    episode = load_episode(ep_dir, cfg, ['/opp_racecar/odom', DETECTION_TOPIC, TRACKER_TOPIC])
+    ep, bag, grid = episode.plan, episode.bag, episode.grid.wall_ns
     if grid.size == 0:
         return {'opp_policy': ep['opp_policy']['name'], 'grid_steps': 0}
     line = Track.from_json(os.path.join(ep['map_dir'], 'global_waypoints.json'), TRACKER_LINE)
-    bag = read_bag(os.path.join(ep_dir, 'bag'), ['/opp_racecar/odom', DETECTION_TOPIC, TRACKER_TOPIC])
     opp_odom = odom_arrays(bag['/opp_racecar/odom'])
     gt = gt_on_grid(opp_odom, grid, line)  # truth in the tracker's own frame (raceline Frenet)
     gate, age = cfg['tracker']['assoc_gate_m'], cfg['tracker']['max_age_s']
@@ -208,17 +204,13 @@ def _median(a):
 
 
 def policies_episode(ep_dir: str, cfg: dict) -> dict:
-    with open(os.path.join(ep_dir, 'episode.json')) as f:
-        ep = json.load(f)
-    with open(os.path.join(ep_dir, 'result.json')) as f:
-        result = json.load(f)
+    episode = load_episode(ep_dir, cfg, ['/opp_racecar/odom', '/opp_racecar/opp_odom', '/state_estimation/odom',
+                                         '/opp_drive'])
+    ep, bag, grid = episode.plan, episode.bag, episode.grid.wall_ns
     pol = ep['opp_policy']
     out = {'opp_policy': pol['name'], 'kind': pol['kind']}
-    grid = episode_grid(ep, result, cfg)
     wpnts = os.path.join(ep['map_dir'], 'global_waypoints.json')
     tracks = {line: Track.from_json(wpnts, line) for line in LINE_KEYS}
-    bag = read_bag(os.path.join(ep_dir, 'bag'), ['/opp_racecar/odom', '/opp_racecar/opp_odom', '/state_estimation/odom',
-                                                 '/opp_drive'])
     if pol['kind'] == 'python':
         out['replay'] = replay_python_policy(ep, bag, tracks)
     if grid.size == 0:
@@ -237,7 +229,7 @@ def policies_episode(ep_dir: str, cfg: dict) -> dict:
     t_drive = np.array([m[0] for m in bag['/opp_drive']])
     idx = np.searchsorted(t_drive, grid, side='right') - 1
     cmd = np.where(idx >= 0, np.array([m[1].drive.speed for m in bag['/opp_drive']])[np.clip(idx, 0, None)], np.nan)
-    raw = pd.DataFrame({'t': (grid - result['t0_ns']) * 1e-9, 'speed': speed, 'v_target': v_target,
+    raw = pd.DataFrame({'t': episode.grid.t_s, 'speed': speed, 'v_target': v_target,
                         'cmd': cmd, 'd_line': on_line['d']})
 
     # the dataset rows as the pipeline writes them, x from the ground truth so perception does not interfere
@@ -298,3 +290,166 @@ def print_policies(report: dict):
         print(f"  {name:8s} {e['opp_policy']:18s} {e['rows']:4d} {fmt(e['speed_true_over_target'], '{:8.2f}')} "
               f"{fmt(e['speed_cmd_over_target'], '{:10.2f}')} {fmt(e.get('x_opp_vs_over_speed'), '{:6.2f}')} "
               f"{fmt(e.get('x_opp_d_minus_offset_m'), '{:+8.3f}')} {fmt(e.get('abs_d_to_own_line_m'), '{:8.3f}')} {block:>15s}")
+
+
+# ------------------------------------------------------------------------------------------- labels
+SHIFTS = range(-3, 4)          # grid steps
+HORIZONS_S = (0.25, 0.5, 1.0)  # open-loop replay horizons
+REPLAY_EVERY = 5               # start a replay at every n-th dataset row
+
+
+def _shifted(a, j):
+    """a[k + j] at index k, NaN outside."""
+    out = np.full(len(a), np.nan)
+    if j >= 0:
+        out[:len(a) - j] = a[j:]
+    else:
+        out[-j:] = a[:j]
+    return out
+
+
+def _sim_params() -> dict:
+    from ament_index_python.packages import get_package_share_directory
+    path = os.path.join(get_package_share_directory('stack_master'), 'config', 'SIM', 'sim_params.yaml')
+    with open(path) as f:
+        return {k: float(v) for k, v in yaml.safe_load(f).items()}
+
+
+class GymReplay:
+    """Open-loop replay of drive commands with the gym's single-track model (RK4, pid, 2-step steering delay)."""
+
+    def __init__(self, params: dict):
+        from f110_gym.envs.dynamic_models import pid, vehicle_dynamics_st
+        self.p, self.pid, self.f = params, pid, vehicle_dynamics_st
+        self.args = tuple(params[k] for k in ('mu', 'C_Sf', 'C_Sr', 'lf', 'lr', 'h', 'm', 'I', 's_min', 's_max',
+                                               'sv_min', 'sv_max', 'v_switch', 'a_max', 'v_min', 'v_max'))
+
+    def run(self, state, steer_buffer, commands):
+        """state [x, y, steer, v, yaw, yaw_rate, slip]; commands: (steer, speed) per physics step. Returns xy per step."""
+        x, buf, out = np.array(state, dtype=float), list(steer_buffer), []
+        p = self.p
+        for raw_steer, speed in commands:
+            steer = buf[-1]
+            buf = [raw_steer] + buf[:-1]
+            accl, sv = self.pid(speed, steer, x[3], x[2], p['sv_max'], p['a_max'], p['v_max'], p['v_min'])
+            u = np.array([sv, accl])
+            k1 = self.f(x, u, *self.args)
+            k2 = self.f(x + PHYSICS_DT_S * k1 / 2, u, *self.args)
+            k3 = self.f(x + PHYSICS_DT_S * k2 / 2, u, *self.args)
+            k4 = self.f(x + PHYSICS_DT_S * k3, u, *self.args)
+            x = x + PHYSICS_DT_S / 6 * (k1 + 2 * k2 + 2 * k3 + k4)
+            out.append(x[:2].copy())
+        return np.array(out)
+
+
+def labels_episode(ep_dir: str, cfg: dict, replay: GymReplay) -> dict:
+    episode = load_episode(ep_dir, cfg, ['/opp_racecar/odom', '/opp_drive'])
+    ep, bag, grid = episode.plan, episode.bag, episode.grid.wall_ns
+    pol = ep['opp_policy']
+    out = {'opp_policy': pol['name']}
+    if grid.size < 2:
+        out['rows'] = 0
+        return out
+    dt = cfg['dt']
+    ref = Track.from_json(os.path.join(ep['map_dir'], 'global_waypoints.json'), cfg['reference'])
+    opp_odom = odom_arrays(bag['/opp_racecar/odom'])
+
+    # physics steps per second of wall-clock time
+    t_step = np.array([m[0] for m in bag[PHYSICS_STEP_TOPIC]], dtype=np.int64)
+    in_ep = (t_step >= grid[0]) & (t_step <= grid[-1])
+    out['physics_steps_per_s'] = round(float(in_ep.sum() / ((grid[-1] - grid[0]) * 1e-9)), 1)
+
+    # 1. state labels vs velocities: ds/dt = v_t / (1 - kappa d), dd/dt = v_n, trapezoid over [k, k+1]
+    gt = gt_on_grid(opp_odom, grid, ref)
+    kappa = ref.interp(ref.kappa, gt['s'])
+    sdot, ddot = gt['vs'] / (1 - kappa * gt['d']), gt['vd']
+    exp_ds = dt * (sdot + _shifted(sdot, 1)) / 2
+    exp_dd = dt * (ddot + _shifted(ddot, 1)) / 2
+    raw = pd.DataFrame({'t': episode.grid.t_s, 'k': np.arange(len(grid))})
+    for j in SHIFTS:
+        raw[f'exp_ds_{j}'], raw[f'exp_dd_{j}'] = _shifted(exp_ds, j), _shifted(exp_dd, j)
+    df, _, _ = episode_table(ep_dir, {**cfg, 'opp_source': 'gt', 'labels': {'type': 'state_delta', 'horizon': 1}})
+    if df is None or not len(df):
+        out['rows'] = 0
+        return out
+    df = df.merge(raw, on='t')
+    out['rows'] = len(df)
+    out['y_ds_over_expected'] = _median(df['y_ds_1'] / df['exp_ds_0'])
+    out['y_ds_error_m'] = _stats((df['y_ds_1'] - df['exp_ds_0']).to_numpy())
+    out['y_dd_error_m'] = _stats((df['y_dd_1'] - df['exp_dd_0']).to_numpy())
+    rmse = {j: float(np.sqrt(np.nanmean((df['y_ds_1'] - df[f'exp_ds_{j}'])**2 + (df['y_dd_1'] - df[f'exp_dd_{j}'])**2)))
+            for j in SHIFTS}
+    out['label_shift_rmse_m'] = {j: round(v, 4) for j, v in rmse.items()}
+    out['best_shift'] = int(min(rmse, key=rmse.get))
+
+    # 2. action labels replayed through the gym model, stepping exactly when the simulator stepped
+    t_cmd = np.array([m[0] for m in bag['/opp_drive']], dtype=np.int64)
+    cmds = np.array([[m[1].drive.steering_angle, m[1].drive.speed] for m in bag['/opp_drive']])
+    zoh = lambda t: cmds[np.clip(np.searchsorted(t_cmd, t, side='right') - 1, 0, None)]
+    pos = lambda t: np.array([np.interp(t, opp_odom['t'], opp_odom['x']), np.interp(t, opp_odom['t'], opp_odom['y'])])
+    err = {h: {'replay': [], 'const_vel': []} for h in HORIZONS_S}
+    n_steps = int(round(max(HORIZONS_S) / PHYSICS_DT_S))  # horizons are simulated time, i.e. physics steps
+    for k in df['k'].to_numpy()[::REPLAY_EVERY]:
+        t0 = grid[k]
+        steps = t_step[t_step > t0][:n_steps]
+        if len(steps) < n_steps or steps[-1] > grid[-1]:
+            continue
+        v = np.hypot(np.interp(t0, opp_odom['t'], opp_odom['vx_b']), np.interp(t0, opp_odom['t'], opp_odom['vy_b']))
+        yaw = np.interp(t0, opp_odom['t'], opp_odom['yaw'])
+        # the steering angle is not in the odometry: assume it has settled on the command applied two steps ago
+        before = t_step[t_step <= t0][-3:]
+        buf = [zoh(t)[0] for t in before[::-1][:2]] if len(before) >= 3 else [zoh(t0)[0]] * 2
+        steer0 = zoh(before[0])[0] if len(before) >= 3 else zoh(t0)[0]
+        wz = np.interp(t0, opp_odom['t'], opp_odom['wz'])
+        xy = replay.run([*pos(t0), steer0, v, yaw, wz, 0.0], buf, [zoh(t) for t in steps])
+        for h in HORIZONS_S:
+            i = int(round(h / PHYSICS_DT_S)) - 1
+            truth = pos(steps[i])
+            err[h]['replay'].append(float(np.hypot(*(xy[i] - truth))))
+            cv = pos(t0) + v * h * np.array([np.cos(yaw), np.sin(yaw)])
+            err[h]['const_vel'].append(float(np.hypot(*(cv - truth))))
+    out['replay_position_error_m'] = {
+        str(h): {m: {'median': _median(e), 'p95': round(float(np.percentile(e, 95)), 3) if e else None, 'n': len(e)}
+                 for m, e in err[h].items()} for h in HORIZONS_S}
+    return out
+
+
+def check_labels(run_dir: str, dataset_override: dict = None) -> dict:
+    with open(os.path.join(run_dir, 'spec.yaml')) as f:
+        spec = yaml.safe_load(f)
+    with open(os.path.join(run_dir, 'manifest.json')) as f:
+        manifest = json.load(f)
+    cfg = {**dataset_config(dataset_override if dataset_override is not None else spec.get('dataset')), 'frame': 'frenet'}
+    replay = GymReplay(_sim_params())
+    episodes = {e['name']: labels_episode(os.path.join(run_dir, 'episodes', e['name']), cfg, replay)
+                for e in manifest['episodes'] if e.get('valid')}
+    report = {'config': cfg, 'episodes': episodes}
+    with open(os.path.join(run_dir, 'check_labels.json'), 'w') as f:
+        json.dump(report, f, indent=2)
+    return report
+
+
+def print_labels(report: dict):
+    fmt = lambda v, f='{:6.3f}': '     -' if v is None else f.format(v)
+    print("State labels vs recorded velocities (x from the ground truth):")
+    print(f"  {'ep':8s} {'policy':24s} {'rows':>4s} {'steps/s':>7s} {'y_ds/exp':>8s} {'ds rmse':>7s} {'dd rmse':>7s} "
+          f"{'best shift':>10s}  rmse at shift -3..+3")
+    for name, e in report['episodes'].items():
+        if not e.get('rows'):
+            print(f"  {name:8s} {e['opp_policy']:24s}    0")
+            continue
+        shifts = ' '.join(f"{v:.3f}" for v in e['label_shift_rmse_m'].values())
+        print(f"  {name:8s} {e['opp_policy']:24s} {e['rows']:4d} {e['physics_steps_per_s']:7.1f} "
+              f"{fmt(e['y_ds_over_expected'], '{:8.3f}')} {fmt(e['y_ds_error_m']['rmse'], '{:7.4f}')} "
+              f"{fmt(e['y_dd_error_m']['rmse'], '{:7.4f}')} {e['best_shift']:+10d}  {shifts}")
+    print("\nAction labels replayed through the gym model, position error [m] median / p95 (constant velocity for scale):")
+    print(f"  {'ep':8s} {'policy':24s} " + ' '.join(f"{h:>9.2f} s replay {'':>4s} const vel" for h in HORIZONS_S))
+    for name, e in report['episodes'].items():
+        r = e.get('replay_position_error_m')
+        if not r:
+            continue
+        cells = []
+        for h in HORIZONS_S:
+            a, b = r[str(h)]['replay'], r[str(h)]['const_vel']
+            cells.append(f"{fmt(a['median'], '{:.3f}')}/{fmt(a['p95'], '{:.3f}')}  {fmt(b['median'], '{:.3f}')}/{fmt(b['p95'], '{:.3f}')}")
+        print(f"  {name:8s} {e['opp_policy']:24s} " + '   '.join(cells))
