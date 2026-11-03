@@ -1,0 +1,10 @@
+# Known-answer variant of opp_line_follower: fixed, clearly non-zero offset to the right (check: x_opp_d ~ -0.2 m).
+name: opp_line_follower_right
+kind: python
+entrypoint: line_follower.py:LineFollower
+rate_hz: 50
+params:
+  line: centerline
+  d_offset_m: -0.2
+  speed_scale: 0.3
+  lookahead_m: 0.8
