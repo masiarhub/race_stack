@@ -3,7 +3,7 @@ name: known_answer
 seed: 0
 episodes: 4
 tracks: [glc_ot_ez]
-ego: {policy: ego_h2h_spliner}
+ego: {policy: ego_h2h_spliner_gt}
 opponents:
   count: 1
   policies: [opp_line_follower_left, opp_line_follower_right, opp_blocker, opp_blocker]

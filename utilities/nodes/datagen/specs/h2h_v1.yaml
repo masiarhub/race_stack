@@ -6,7 +6,7 @@ episodes: 12                 # assigned round robin over (track, opponent policy
 tracks: [glc_ot_ez]
 
 ego:
-  policy: ego_h2h_spliner
+  policy: ego_h2h_spliner_gt  # perfect perception: the ego sees the true opponent
 
 opponents:
   count: 1                   # the gym bridge supports one opponent
@@ -27,7 +27,7 @@ dataset:                     # applied offline by `ros2 run datagen extract`, no
   dt: 0.05
   frame: frenet              # frenet | cartesian
   reference: centerline      # centerline | raceline | shortest_path
-  opp_source: tracker        # x from the ego's tracker (tracker) or the sim ground truth (gt)
+  opp_source: gt             # x from the ego's tracker (tracker) or the sim ground truth (gt)
   features:
     - rel_pos                # delta_s, delta_d
     - opp_d
