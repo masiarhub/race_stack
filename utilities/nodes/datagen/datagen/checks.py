@@ -25,6 +25,7 @@ import yaml
 from datagen.extract import (PHYSICS_DT_S, TRACKER_LINE, dataset_config, episode_table, gt_on_grid,
                              load_episode, odom_arrays, physics_steps_ns)
 from datagen.policy import Obs, _sha256, load_policy_class, state_from_odom
+from datagen.rollout import RolloutModel
 from datagen.track import LINE_KEYS, Track
 
 DETECTION_TOPIC = '/perception/detection/raw_obstacles'
@@ -341,34 +342,7 @@ def _sim_params() -> dict:
         return {k: float(v) for k, v in yaml.safe_load(f).items()}
 
 
-class GymReplay:
-    """Open-loop replay of drive commands with the gym's single-track model (RK4, pid, 2-step steering delay)."""
-
-    def __init__(self, params: dict):
-        from f110_gym.envs.dynamic_models import pid, vehicle_dynamics_st
-        self.p, self.pid, self.f = params, pid, vehicle_dynamics_st
-        self.args = tuple(params[k] for k in ('mu', 'C_Sf', 'C_Sr', 'lf', 'lr', 'h', 'm', 'I', 's_min', 's_max',
-                                               'sv_min', 'sv_max', 'v_switch', 'a_max', 'v_min', 'v_max'))
-
-    def run(self, state, steer_buffer, commands):
-        """state [x, y, steer, v, yaw, yaw_rate, slip]; commands: (steer, speed) per physics step. Returns xy per step."""
-        x, buf, out = np.array(state, dtype=float), list(steer_buffer), []
-        p = self.p
-        for raw_steer, speed in commands:
-            steer = buf[-1]
-            buf = [raw_steer] + buf[:-1]
-            accl, sv = self.pid(speed, steer, x[3], x[2], p['sv_max'], p['a_max'], p['v_max'], p['v_min'])
-            u = np.array([sv, accl])
-            k1 = self.f(x, u, *self.args)
-            k2 = self.f(x + PHYSICS_DT_S * k1 / 2, u, *self.args)
-            k3 = self.f(x + PHYSICS_DT_S * k2 / 2, u, *self.args)
-            k4 = self.f(x + PHYSICS_DT_S * k3, u, *self.args)
-            x = x + PHYSICS_DT_S / 6 * (k1 + 2 * k2 + 2 * k3 + k4)
-            out.append(x[:2].copy())
-        return np.array(out)
-
-
-def labels_episode(ep_dir: str, cfg: dict, replay: GymReplay) -> dict:
+def labels_episode(ep_dir: str, cfg: dict, replay: RolloutModel) -> dict:
     episode = load_episode(ep_dir, cfg, ['/opp_racecar/odom', '/opp_drive'])
     ep, bag, grid = episode.plan, episode.bag, episode.grid.wall_ns
     pol = ep['opp_policy']
@@ -429,7 +403,7 @@ def labels_episode(ep_dir: str, cfg: dict, replay: GymReplay) -> dict:
         buf = [zoh(t)[0] for t in before[::-1][:2]] if len(before) >= 3 else [zoh(t0)[0]] * 2
         steer0 = zoh(before[0])[0] if len(before) >= 3 else zoh(t0)[0]
         wz = np.interp(t0, opp_odom['t'], opp_odom['wz'])
-        xy = replay.run([*pos(t0), steer0, v, yaw, wz, 0.0], buf, [zoh(t) for t in steps])
+        xy = replay.run([*pos(t0), steer0, v, yaw, wz, 0.0], buf, [zoh(t) for t in steps])[:, :2]
         for h in HORIZONS_S:
             i = int(round(h / PHYSICS_DT_S)) - 1
             truth = pos(steps[i])
@@ -448,7 +422,7 @@ def check_labels(run_dir: str, dataset_override: dict = None) -> dict:
     with open(os.path.join(run_dir, 'manifest.json')) as f:
         manifest = json.load(f)
     cfg = {**dataset_config(dataset_override if dataset_override is not None else spec.get('dataset')), 'frame': 'frenet'}
-    replay = GymReplay(_sim_params())
+    replay = RolloutModel(_sim_params())
     episodes = {e['name']: labels_episode(os.path.join(run_dir, 'episodes', e['name']), cfg, replay)
                 for e in manifest['episodes'] if e.get('valid')}
     report = {'config': cfg, 'episodes': episodes}
