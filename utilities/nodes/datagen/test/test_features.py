@@ -1,10 +1,11 @@
 import os
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 import yaml
 
-from datagen.extract import agent_state, columns_of, dataset_config, label_columns
+from datagen.extract import PHYSICS_DT_S, agent_state, columns_of, dataset_config, label_columns, with_slip
 from datagen.features import FEATURES, LABELS, Context
 from datagen.policy import AgentState, Obs, load_policy_class
 from datagen.track import Track
@@ -102,4 +103,23 @@ def test_h2h_policy_input_has_19_values():
 
 def test_h2h_steering_limit_matches_the_simulator():
     with open(os.path.join(HERE, '..', '..', '..', '..', 'stack_master', 'config', 'SIM', 'sim_params.yaml')) as f:
-        assert h2h_dataset()['labels']['steer_limit_rad'] == yaml.safe_load(f)['s_max']
+        sim = yaml.safe_load(f)
+    # the gym only stops steering once s_max is passed, so the angle can overshoot it by one physics step
+    assert h2h_dataset()['labels']['steer_limit_rad'] == pytest.approx(sim['s_max'] + sim['sv_max'] * PHYSICS_DT_S)
+
+
+def odom_moving_at(speed):
+    t = np.array([0, 10, 20], dtype=np.int64)
+    return {'t': t, 'vx_b': np.full(3, speed), 'vy_b': np.zeros(3), 'yaw': np.zeros(3)}
+
+
+def test_with_slip_turns_the_speed_into_true_body_velocities():
+    msgs = [(t, SimpleNamespace(data=[0, 0, 0, 2.0, 0, 0, 0.2])) for t in (0, 10, 20)]
+    odom = with_slip(odom_moving_at(2.0), msgs)
+    assert np.allclose(odom['vx_b'], 2.0 * np.cos(0.2))
+    assert np.allclose(odom['vy_b'], 2.0 * np.sin(0.2))
+
+
+def test_with_slip_leaves_recordings_without_rollout_state_unchanged():
+    odom = odom_moving_at(2.0)
+    assert with_slip(odom, []) is odom

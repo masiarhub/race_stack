@@ -38,6 +38,7 @@ TRACKER_LINE = 'raceline'
 # /sim/collisions is the combined collision topic of runs recorded before the car / wall split
 PHYSICS_STEP_TOPICS = ('/sim/collision/walls', '/sim/collisions')
 PHYSICS_DT_S = 0.01  # [s] physics time step of the gym
+ROLLOUT_STATE_SLIP = 6  # index of the slip angle in [x, y, steer_angle, vel, yaw_angle, yaw_rate, slip_angle]
 
 
 def dataset_config(spec_dataset: dict) -> dict:
@@ -87,6 +88,19 @@ def odom_arrays(msgs) -> dict:
             'vx_b': np.array([m[1].twist.twist.linear.x for m in msgs]),
             'vy_b': np.array([m[1].twist.twist.linear.y for m in msgs]),
             'wz': np.array([m[1].twist.twist.angular.z for m in msgs])}
+
+
+def with_slip(odom: dict, rollout_state_msgs) -> dict:
+    """
+    Odometry with the true body velocities of the simulator. The gym reports its speed as vx and a lateral velocity
+    of 0, the slip angle is only in the rollout state. Recordings without that topic are returned unchanged.
+    """
+    if not rollout_state_msgs:
+        return odom
+    t = np.array([m[0] for m in rollout_state_msgs], dtype=np.int64)
+    slip = np.interp(odom['t'], t, [m[1].data[ROLLOUT_STATE_SLIP] for m in rollout_state_msgs])
+    speed = np.hypot(odom['vx_b'], odom['vy_b'])
+    return {**odom, 'vx_b': speed * np.cos(slip), 'vy_b': speed * np.sin(slip)}
 
 
 def drive_zoh(msgs, grid) -> dict:
@@ -234,12 +248,13 @@ def load_episode(ep_dir: str, cfg: dict, topics: list) -> Episode:
 
 def episode_table(ep_dir: str, cfg: dict):
     episode = load_episode(ep_dir, cfg, ['/state_estimation/odom', '/opp_racecar/odom', '/perception/obstacles',
-                                         '/drive', '/opp_drive'])
+                                         '/drive', '/opp_drive', '/rollout_state', '/opp_racecar/rollout_state'])
     ep, bag, grid = episode.plan, episode.bag, episode.grid.wall_ns
     wpnts = os.path.join(ep['map_dir'], 'global_waypoints.json')
     ref = Track.from_json(wpnts, cfg['reference'])
     tracker_line = Track.from_json(wpnts, TRACKER_LINE)
-    ego_odom, opp_odom = odom_arrays(bag['/state_estimation/odom']), odom_arrays(bag['/opp_racecar/odom'])
+    ego_odom = with_slip(odom_arrays(bag['/state_estimation/odom']), bag['/rollout_state'])
+    opp_odom = with_slip(odom_arrays(bag['/opp_racecar/odom']), bag['/opp_racecar/rollout_state'])
     if grid.size == 0:
         return None, [], {'rows': 0, 'note': 'episode shorter than the warm-up'}
 
