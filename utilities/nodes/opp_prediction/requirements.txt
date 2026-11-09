@@ -1,0 +1,13 @@
+# same versions as the race stack container where possible, torch is the CPU build:
+# pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.14.1
+numpy==1.22.0
+pandas==2.0.3
+numba==0.68.0
+scipy==1.7.3
+pyyaml
+pytest
+gymnasium==0.29.1
+pyglet==1.5.20
+pyopengl
+Pillow
