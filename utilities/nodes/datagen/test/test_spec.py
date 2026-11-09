@@ -7,7 +7,7 @@ MAPS = os.path.realpath(os.path.join(HERE, '..', '..', '..', '..', 'stack_master
 os.environ.setdefault('DATAGEN_MAPS_DIR', MAPS)
 
 from datagen.sampling import sample, episode_rng  # noqa: E402
-from datagen.spec import load_spec, plan_episode  # noqa: E402
+from datagen.spec import RECORD_TOPICS, load_spec, plan_episode  # noqa: E402
 
 SPEC = os.path.join(HERE, '..', 'specs', 'h2h_v1.yaml')
 
@@ -42,3 +42,8 @@ def test_uniform_step():
     for i in range(20):
         x = sample({'uniform': [0.25, 0.4], 'step': 0.01}, episode_rng(0, i, 'p'))
         assert abs(x * 100 - round(x * 100)) < 1e-9 and 0.25 <= x <= 0.4
+
+
+def test_records_what_the_rollout_needs():
+    for topic in ('/rollout_state', '/opp_racecar/rollout_state', '/local_waypoints'):
+        assert topic in RECORD_TOPICS
