@@ -2,8 +2,9 @@ import os
 
 import numpy as np
 import pytest
+import yaml
 
-from datagen.extract import agent_state, dataset_config
+from datagen.extract import agent_state, columns_of, dataset_config, label_columns
 from datagen.features import FEATURES, LABELS, Context
 from datagen.policy import AgentState, Obs, load_policy_class
 from datagen.track import Track
@@ -64,3 +65,41 @@ def test_example_policies_drive(entry):
     steer, speed = policy.act(Obs(0.0, me, st(tr.length - 1.0, 0.3)))
     assert steer > 0  # turning left, into the circle
     assert np.isclose(speed, 0.5)
+
+
+def test_action_label_clips_steering_to_the_limit():
+    ctx, _ = make_ctx()
+    ctx.opp_cmd = {'steer': np.array([0.1, 0.6, -0.9]), 'speed': np.array([1.0, 2.0, 3.0])}
+    cols = {c[0]: c[1] for c in LABELS['action'](ctx, steer_limit_rad=0.4)}
+    assert np.allclose(cols['steer_0'], [0.1, 0.4, -0.4])
+    assert np.allclose(cols['speed_0'], [1.0, 2.0, 3.0])
+
+
+def test_action_label_keeps_raw_commands_without_a_limit():
+    ctx, _ = make_ctx()
+    ctx.opp_cmd = {'steer': np.array([0.1, 0.6, -0.9]), 'speed': np.zeros(3)}
+    cols = {c[0]: c[1] for c in LABELS['action'](ctx)}
+    assert np.allclose(cols['steer_0'], [0.1, 0.6, -0.9])
+
+
+def test_label_options_of_the_spec_reach_the_label():
+    ctx, _ = make_ctx()
+    ctx.opp_cmd = {'steer': np.array([0.6]), 'speed': np.zeros(1)}
+    cfg = dataset_config({'labels': {'type': 'action', 'horizon': 1, 'steer_limit_rad': 0.4}})
+    cols = {c[0]: c[1] for c in label_columns(cfg, ctx)}
+    assert np.allclose(cols['y_steer_0'], [0.4])
+
+
+def h2h_dataset():
+    with open(os.path.join(HERE, '..', 'specs', 'h2h_v1.yaml')) as f:
+        return yaml.safe_load(f)['dataset']
+
+
+def test_h2h_policy_input_has_19_values():
+    ctx, _ = make_ctx()
+    assert len(columns_of(dataset_config(h2h_dataset())['features'], ctx, FEATURES, 'x')) == 19
+
+
+def test_h2h_steering_limit_matches_the_simulator():
+    with open(os.path.join(HERE, '..', '..', '..', '..', 'stack_master', 'config', 'SIM', 'sim_params.yaml')) as f:
+        assert h2h_dataset()['labels']['steer_limit_rad'] == yaml.safe_load(f)['s_max']

@@ -171,6 +171,11 @@ def columns_of(entries, ctx, registry, prefix):
     return cols
 
 
+def label_columns(cfg, ctx):
+    options = {k: v for k, v in cfg['labels'].items() if k != 'type'}
+    return columns_of([{cfg['labels']['type']: options}], ctx, LABELS, 'y')
+
+
 class Grid(NamedTuple):
     """Sample times of one episode, equally spaced in simulated time."""
     wall_ns: np.ndarray  # recording-clock times at which messages are looked up
@@ -254,7 +259,7 @@ def episode_table(ep_dir: str, cfg: dict):
                 shifted[j:] = v[:-j]
                 hist.append((f'{name}_m{j}', shifted, unit, f'{desc}, {j} step(s) earlier'))
         x_cols = hist + x_cols
-    y_cols = columns_of([{cfg['labels']['type']: {'horizon': cfg['labels']['horizon']}}], ctx, LABELS, 'y')
+    y_cols = label_columns(cfg, ctx)
 
     opp_pol = ep['opp_policy']
     meta = [('episode', ep['name'], '', 'episode id'),

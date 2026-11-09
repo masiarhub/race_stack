@@ -34,5 +34,6 @@ dataset:                     # applied offline by `ros2 run datagen extract`, no
     - opp_vel                # vs, vd
     - ego_vel
     - curvature: {n: 10, step_m: 0.5}
-  labels: {type: action, horizon: 1}   # state_delta | state | action
+    - free_space             # distance to the left and right track bound
+  labels: {type: action, horizon: 1, steer_limit_rad: 0.4189}   # state_delta | state | action, limit = s_max of the sim
   history: 1

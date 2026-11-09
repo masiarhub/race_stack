@@ -157,10 +157,16 @@ def state(ctx, horizon=1):
 
 
 @label('action')
-def action(ctx, horizon=1):
-    """Opponent commands u_{k+i}, i = 0..horizon-1, as sent to the simulator (zero order hold)."""
+def action(ctx, horizon=1, steer_limit_rad=None):
+    """
+    Opponent commands u_{k+i}, i = 0..horizon-1, as sent to the simulator (zero order hold).
+    steer_limit_rad clips the steering to what the actuator can apply, commands beyond it give the same motion.
+    """
+    steer = ctx.opp_cmd['steer']
+    if steer_limit_rad is not None:
+        steer = np.clip(steer, -steer_limit_rad, steer_limit_rad)
     return [col for i in range(horizon) for col in (
-        (f'steer_{i}', _shift(ctx.opp_cmd['steer'], i), 'rad', f'opp commanded steering angle at k+{i}'),
+        (f'steer_{i}', _shift(steer, i), 'rad', f'opp commanded steering angle at k+{i}'),
         (f'speed_{i}', _shift(ctx.opp_cmd['speed'], i), 'm/s', f'opp commanded speed at k+{i}'))]
 
 
