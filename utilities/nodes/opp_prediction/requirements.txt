@@ -8,6 +8,7 @@ scipy==1.7.3
 pyyaml
 pytest
 rosbags==0.11.9
+tensorboard==2.21.0
 gymnasium==0.29.1
 pyglet==1.5.20
 pyopengl

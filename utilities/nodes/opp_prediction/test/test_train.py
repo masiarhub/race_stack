@@ -8,6 +8,8 @@ import torch
 from opp_prediction.ensemble import Ensemble
 from opp_prediction.train import TrainConfig, split_episodes, train
 
+SMALL = dict(members=2, hidden=16, layers=1, max_epochs=3, patience=3, seed=0)
+
 
 def episodes(n=20):
     return {f'ep_{i:02d}': ('a' if i % 2 else 'b') for i in range(n)}
@@ -67,3 +69,48 @@ def test_training_reports_held_out_results(trained):
     assert set(report['episodes']) == {'train', 'val', 'test'}
     assert report['test']['rmse']['speed'] < report['test']['rmse_of_train_mean']['speed'] + 0.05
     assert 0.0 < report['test']['coverage']['0.9']['speed'] <= 1.0
+
+
+def scalar_tags(run_dir):
+    from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
+    events = EventAccumulator(str(run_dir))
+    events.Reload()
+    return events
+
+
+def test_tensorboard_writes_one_run_per_member_with_the_same_tags(noisy_line, tmp_path):
+    train(noisy_line, tmp_path / 'out', TrainConfig(**SMALL))
+    logs = tmp_path / 'out' / 'tensorboard'
+    first, second = scalar_tags(logs / 'member_0'), scalar_tags(logs / 'member_1')
+    assert first.Tags()['scalars'] == second.Tags()['scalars']
+    for tag in ('loss/train', 'nll/val', 'rmse/steer', 'sigma_mean/speed', 'logvar_bound/min/steer',
+                'logvar_bound/max/speed', 'bound_share/steer', 'coverage_90/speed'):
+        assert tag in first.Tags()['scalars']
+    assert len(first.Scalars('nll/val')) == 3
+    assert 'sigma/steer' in first.Tags()['histograms']
+
+
+def test_tensorboard_summarizes_the_ensemble(noisy_line, tmp_path):
+    train(noisy_line, tmp_path / 'out', TrainConfig(**SMALL))
+    tags = scalar_tags(tmp_path / 'out' / 'tensorboard' / 'ensemble').Tags()['scalars']
+    for tag in ('epistemic_std/steer', 'aleatoric_std/speed', 'coverage_90/steer', 'nll'):
+        assert tag in tags
+
+
+def test_tensorboard_can_be_turned_off(noisy_line, tmp_path):
+    train(noisy_line, tmp_path / 'out', TrainConfig(**SMALL, tensorboard=False))
+    assert not (tmp_path / 'out' / 'tensorboard').exists()
+
+
+def test_logging_does_not_change_the_training(noisy_line, tmp_path):
+    train(noisy_line, tmp_path / 'with', TrainConfig(**SMALL, tensorboard=True))
+    train(noisy_line, tmp_path / 'without', TrainConfig(**SMALL, tensorboard=False))
+    logged = Ensemble.load(tmp_path / 'with' / 'ensemble.pt').state_dict()
+    plain = Ensemble.load(tmp_path / 'without' / 'ensemble.pt').state_dict()
+    assert all(torch.equal(logged[key], plain[key]) for key in plain)
+
+
+def test_a_new_run_replaces_the_old_logs(noisy_line, tmp_path):
+    train(noisy_line, tmp_path / 'out', TrainConfig(**SMALL))
+    train(noisy_line, tmp_path / 'out', TrainConfig(**SMALL))
+    assert len(list((tmp_path / 'out' / 'tensorboard' / 'member_0').glob('events.out.*'))) == 1

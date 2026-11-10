@@ -11,6 +11,7 @@ import pandas as pd
 import torch
 
 from opp_prediction.ensemble import Ensemble
+from opp_prediction.training_log import TrainingLog
 
 ACTIONS = {'steer': 'y_steer_0', 'speed': 'y_speed_0'}
 COVERAGE_LEVELS = (0.5, 0.9)
@@ -26,6 +27,7 @@ class TrainConfig:
     max_epochs: int = 200
     patience: int = 20
     seed: int = 0
+    tensorboard: bool = True
 
 
 def split_episodes(episode_policy: dict, seed: int, fractions=(0.7, 0.15, 0.15)) -> dict:
@@ -41,26 +43,31 @@ def split_episodes(episode_policy: dict, seed: int, fractions=(0.7, 0.15, 0.15))
     return {name: sorted(part) for name, part in parts.items()}
 
 
-def _fit_member(model: Ensemble, member: int, data: dict, cfg: TrainConfig):
+def _fit_member(model: Ensemble, member: int, data: dict, cfg: TrainConfig, log: TrainingLog):
     inputs, actions = data['train']
     val_inputs, val_actions = data['val']
     optimizer = torch.optim.Adam(model.members[member].parameters(), lr=cfg.lr)
     order = torch.Generator().manual_seed(cfg.seed + member)
-    best, best_state, stale = math.inf, None, 0
-    for _ in range(cfg.max_epochs):
+    best, best_state, best_epoch, stale = math.inf, None, 0, 0
+    for epoch in range(cfg.max_epochs):
+        epoch_loss = 0.0
         for batch in torch.randperm(len(inputs), generator=order).split(cfg.batch_size):
             optimizer.zero_grad()
-            model.loss(member, inputs[batch], actions[batch]).backward()
+            loss = model.loss(member, inputs[batch], actions[batch])
+            loss.backward()
             optimizer.step()
+            epoch_loss += loss.item() * len(batch)
         with torch.no_grad():
             val = model.nll(member, val_inputs, val_actions).item()
+        log.epoch(model, member, epoch, epoch_loss / len(inputs), val, val_inputs, val_actions)
         if val < best:
-            best, best_state, stale = val, copy.deepcopy(model.members[member].state_dict()), 0
+            best, best_state, best_epoch, stale = val, copy.deepcopy(model.members[member].state_dict()), epoch, 0
         else:
             stale += 1
             if stale >= cfg.patience:
                 break
     model.members[member].load_state_dict(best_state)
+    log.member_done(member, best_epoch)
 
 
 def _evaluate(model: Ensemble, inputs, actions, train_mean) -> dict:
@@ -97,15 +104,18 @@ def train(dataset_csv, out_dir, config: TrainConfig = TrainConfig()) -> dict:
     torch.manual_seed(config.seed)
     model = Ensemble(input_columns, config.members, config.hidden, config.layers)
     model.fit_normalization(*data['train'])
+    out = pathlib.Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    log = TrainingLog(out / 'tensorboard' if config.tensorboard else None, tuple(ACTIONS))
     for member in range(config.members):
-        _fit_member(model, member, data, config)
+        _fit_member(model, member, data, config, log)
     model.eval()
 
     train_mean = data['train'][1].mean(0)
     report = {'config': dataclasses.asdict(config), 'episodes': split, 'rows': {k: len(v[0]) for k, v in data.items()},
               **{name: _evaluate(model, *data[name], train_mean) for name in ('val', 'test')}}
-    out = pathlib.Path(out_dir)
-    out.mkdir(parents=True, exist_ok=True)
+    log.ensemble(report['val'], dataclasses.asdict(config))
+    log.close()
     model.save(out / 'ensemble.pt')
     (out / 'report.json').write_text(json.dumps(report, indent=2))
     return report
@@ -116,8 +126,9 @@ def main():
     parser.add_argument('dataset_csv')
     parser.add_argument('out_dir')
     parser.add_argument('--seed', type=int, default=0)
+    parser.add_argument('--no-tensorboard', action='store_true', help='do not write the TensorBoard log')
     args = parser.parse_args()
-    report = train(args.dataset_csv, args.out_dir, TrainConfig(seed=args.seed))
+    report = train(args.dataset_csv, args.out_dir, TrainConfig(seed=args.seed, tensorboard=not args.no_tensorboard))
     print(json.dumps({k: report[k] for k in ('rows', 'val', 'test')}, indent=2))
 
 

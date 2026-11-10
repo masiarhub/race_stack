@@ -8,7 +8,8 @@ conda activate opp_prediction
 pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
 
 python -m pytest test                                       # from this folder
-python -m opp_prediction.train <dataset.csv> <out_dir>      # writes ensemble.pt and report.json
+python -m opp_prediction.train <dataset.csv> <out_dir>      # writes ensemble.pt, report.json and a TensorBoard log
+tensorboard --logdir <out_dir>/tensorboard                  # one run per ensemble member, overlaid
 ```
 
 `Ensemble.distribution(o)` returns the action mean and std in physical units, each `[members, N, 2]`.
