@@ -47,7 +47,7 @@ class EgoPlan:
         return {'x': x, 'y': y, 'vx': vx, 'vy': vy, 's': track.wrap_s(s), 'd': d, 'vs': vs, 'vd': vd}
 
 
-def _project(track, rollout_states) -> dict:
+def project(track, rollout_states) -> dict:
     """The rollout state in the Frenet frame of the track, with the velocity along yaw + slip."""
     xi = np.asarray(rollout_states)
     course = xi[:, 4] + xi[:, 6]
@@ -62,7 +62,7 @@ class Predictor:
 
     def _policy_input(self, rollout_states, ego: dict, track):
         """The same features as the training data, built from the rollout state of every particle."""
-        opp = _project(track, rollout_states)
+        opp = project(track, rollout_states)
         columns = columns_of(self.features, Context('frenet', track, opp, opp, ego, None, None), FEATURES, 'x')
         names = [c[0] for c in columns]
         if names != self.ensemble.input_columns:

@@ -19,3 +19,7 @@ python -m opp_prediction.train <dataset.csv> <out_dir>      # writes ensemble.pt
 ```bash
 export PYTHONPATH=$PWD:$PWD/../datagen:$PWD/../../../base_system/f110_simulator/f1tenth_gym/gym
 ```
+
+`python -m opp_prediction.evaluate <run_dir> <model_dir>` predicts on the held-out episodes of a run and writes
+`evaluation_<part>_rho<rho>.json` next to the model: accuracy, calibration and usefulness of the uncertainty, per step
+of the horizon and separately along (s) and across (d) the track, against a constant-velocity baseline.
