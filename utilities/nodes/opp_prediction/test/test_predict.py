@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 import torch
 
+from datagen.extract import history_columns
 from opp_prediction.predict import EgoPlan, Predictor
 from test_track import circle
 
@@ -115,6 +116,42 @@ def test_policy_input_uses_the_slip_angle():
 def test_policy_input_columns_must_match_the_ensemble():
     with pytest.raises(ValueError):
         predictor(FakeEnsemble(columns=['x_other'])).predict(XI0, PLAN, TRACK, horizon=1)
+
+
+def history_ensemble(history=3):
+    return FakeEnsemble(members=1, columns=history_columns(COLUMNS, history))
+
+
+PAST = np.arange(2 * len(COLUMNS), dtype=float).reshape(2, len(COLUMNS))  # observed frames x_{k-2}, x_{k-1}
+
+
+def current_frames(horizon):
+    """The frames a predictor without history feeds to the ensemble, one per step."""
+    ensemble = FakeEnsemble(members=1)
+    predictor(ensemble, particles=1).predict(XI0, PLAN, TRACK, horizon=horizon)
+    return [o[0].numpy() for o in ensemble.inputs]
+
+
+def test_the_first_input_stacks_the_observed_frames_before_the_current_one():
+    ensemble = history_ensemble()
+    predictor(ensemble, particles=2).predict(XI0, PLAN, TRACK, horizon=1, past_inputs=PAST)
+    expected = np.concatenate([PAST[0], PAST[1], current_frames(1)[0]])
+    assert np.allclose(ensemble.inputs[0].numpy(), np.tile(expected, (2, 1)))
+
+
+def test_the_history_moves_on_with_the_frames_of_the_particle():
+    ensemble = history_ensemble()
+    predictor(ensemble, particles=1).predict(XI0, PLAN, TRACK, horizon=3, past_inputs=PAST)
+    frames = current_frames(3)
+    assert np.allclose(ensemble.inputs[1][0].numpy(), np.concatenate([PAST[1], frames[0], frames[1]]))
+    assert np.allclose(ensemble.inputs[2][0].numpy(), np.concatenate([frames[0], frames[1], frames[2]]))
+
+
+def test_an_ensemble_with_history_needs_the_observed_frames():
+    with pytest.raises(ValueError):
+        predictor(history_ensemble()).predict(XI0, PLAN, TRACK, horizon=1)
+    with pytest.raises(ValueError):
+        predictor(history_ensemble()).predict(XI0, PLAN, TRACK, horizon=1, past_inputs=PAST[:1])
 
 
 def test_ego_plan_follows_the_waypoints_in_time():

@@ -1,7 +1,8 @@
 """
 Trajectory prediction: particles of the opponent's motion, sampled from the ensemble and rolled through the rollout
 model. Each particle keeps one ensemble member for the whole horizon (TS-infinity), its action noise is correlated
-over time by rho.
+over time by rho. An ensemble trained with history H sees the frames x_{k-H+1} .. x_k: the frames observed before the
+prediction first, then the frames of the particle's own rollout.
 
 Rollout state: [x, y, steer_angle, vel, yaw_angle, yaw_rate, slip_angle].
 """
@@ -10,7 +11,7 @@ from typing import NamedTuple
 import numpy as np
 import torch
 
-from datagen.extract import PHYSICS_DT_S, agent_state, columns_of
+from datagen.extract import PHYSICS_DT_S, agent_state, columns_of, history_columns
 from datagen.features import FEATURES, Context
 from datagen.rollout import PHYSICS_STEPS_PER_PREDICTION
 
@@ -60,17 +61,30 @@ class Predictor:
         self.particles, self.rho = particles, rho
         self.rng = np.random.default_rng(seed)
 
-    def _policy_input(self, rollout_states, ego: dict, track):
-        """The same features as the training data, built from the rollout state of every particle."""
+    def _frame(self, rollout_states, ego: dict, track):
+        """The features of one step as in the training data, built from the rollout state of every particle."""
         opp = project(track, rollout_states)
         columns = columns_of(self.features, Context('frenet', track, opp, opp, ego, None, None), FEATURES, 'x')
-        names = [c[0] for c in columns]
-        if names != self.ensemble.input_columns:
-            raise ValueError(f'policy input {names} does not match the ensemble input {self.ensemble.input_columns}')
-        return torch.tensor(np.stack([c[1] for c in columns], axis=1), dtype=torch.float32)
+        return [c[0] for c in columns], np.stack([c[1] for c in columns], axis=1)
 
-    def predict(self, xi_0, ego_plan: EgoPlan, track, horizon: int = 60, previous_steer: float = None) -> Particles:
-        """previous_steer: last steering command before the prediction, by default the current steering angle."""
+    def _observed_frames(self, names, past_inputs) -> np.ndarray:
+        """[history - 1, features] frames before the prediction, checked against the ensemble input."""
+        history = max(len(self.ensemble.input_columns) // len(names), 1)
+        if history_columns(names, history) != self.ensemble.input_columns:
+            raise ValueError(f'policy input {names} does not match the ensemble input {self.ensemble.input_columns}')
+        past = np.empty((0, len(names))) if past_inputs is None else np.asarray(past_inputs, dtype=float)
+        if past.shape != (history - 1, len(names)):
+            raise ValueError(f'the ensemble needs {history - 1} observed frames of {len(names)} features before the '
+                             f'prediction, got past_inputs of shape {past.shape}')
+        return past
+
+    def predict(self, xi_0, ego_plan: EgoPlan, track, horizon: int = 60, previous_steer: float = None,
+                past_inputs=None) -> Particles:
+        """
+        previous_steer: last steering command before the prediction, by default the current steering angle.
+        past_inputs: [history - 1, features] observed frames before the prediction, oldest first, in the column order
+        of the ensemble input. Needed only by an ensemble trained with history.
+        """
         n, n_members = self.particles, len(self.ensemble.members)
         members = np.arange(n) % n_members
         ego_states = ego_plan.states(track, np.arange(horizon) * PREDICTION_DT_S)
@@ -81,7 +95,12 @@ class Predictor:
 
         for k in range(horizon):
             ego = {key: np.full(n, value[k]) for key, value in ego_states.items()}
-            mu, sigma = self.ensemble.distribution(self._policy_input(states[:, k], ego, track))
+            names, frame = self._frame(states[:, k], ego, track)
+            if k == 0:
+                window = np.repeat(self._observed_frames(names, past_inputs)[None], n, axis=0)
+            window = np.concatenate([window, frame[:, None]], axis=1)
+            mu, sigma = self.ensemble.distribution(torch.tensor(window.reshape(n, -1), dtype=torch.float32))
+            window = window[:, 1:]
             mean, std = mu[members, np.arange(n)].numpy(), sigma[members, np.arange(n)].numpy()
             actions = mean + std * noise
             states[:, k + 1] = [self.rollout_model.predict_step(states[p, k], previous[p], tuple(actions[p]))
