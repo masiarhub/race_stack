@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 import torch
 
+from datagen.extract import mirrored
 from opp_prediction.ensemble import Ensemble
 from opp_prediction.training_log import TrainingLog
 
@@ -29,6 +30,7 @@ class TrainConfig:
     patience: int = 20
     seed: int = 0
     tensorboard: bool = True
+    mirror: bool = False  # add every train and val row a second time, on the mirror image of its track
 
 
 def split_episodes(episode_policy: dict, seed: int, fractions=(0.7, 0.15, 0.15)) -> dict:
@@ -104,11 +106,14 @@ def train(dataset_csv, out_dir, config: TrainConfig = TrainConfig()) -> dict:
     df = pd.read_csv(dataset_csv)
     input_columns = [c for c in df.columns if c.startswith('x_')]
     split = split_episodes(df.groupby('episode')['opp_policy'].first().to_dict(), config.seed)
-    data = {}
-    for name, episodes in split.items():
-        part = df[df['episode'].isin(episodes)]
-        data[name] = (torch.tensor(part[input_columns].to_numpy(), dtype=torch.float32),
-                      torch.tensor(part[list(ACTIONS.values())].to_numpy(), dtype=torch.float32))
+    parts = {name: df[df['episode'].isin(episodes)] for name, episodes in split.items()}
+    parts['test_mirrored'] = mirrored(parts['test'])  # before training: a column without a mirror rule fails here
+    if config.mirror:
+        for name in ('train', 'val'):
+            parts[name] = pd.concat([parts[name], mirrored(parts[name])], ignore_index=True)
+    data = {name: (torch.tensor(part[input_columns].to_numpy(), dtype=torch.float32),
+                   torch.tensor(part[list(ACTIONS.values())].to_numpy(), dtype=torch.float32))
+            for name, part in parts.items()}
 
     torch.manual_seed(config.seed)
     model = Ensemble(input_columns, config.members, config.hidden, config.layers)
@@ -123,7 +128,7 @@ def train(dataset_csv, out_dir, config: TrainConfig = TrainConfig()) -> dict:
     train_mean = data['train'][1].mean(0)
     report = {'dataset': pathlib.Path(dataset_csv).name, 'config': dataclasses.asdict(config), 'episodes': split,
               'rows': {k: len(v[0]) for k, v in data.items()},
-              **{name: _evaluate(model, *data[name], train_mean) for name in ('val', 'test')}}
+              **{name: _evaluate(model, *data[name], train_mean) for name in ('val', 'test', 'test_mirrored')}}
     log.ensemble(report['val'], dataclasses.asdict(config))
     log.close()
     model.save(out / 'ensemble.pt')
@@ -137,9 +142,12 @@ def main():
     parser.add_argument('out_dir')
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--no-tensorboard', action='store_true', help='do not write the TensorBoard log')
+    parser.add_argument('--mirror', action='store_true',
+                        help='add every train and val row a second time, on the mirror image of its track')
     args = parser.parse_args()
-    report = train(args.dataset_csv, args.out_dir, TrainConfig(seed=args.seed, tensorboard=not args.no_tensorboard))
-    print(json.dumps({k: report[k] for k in ('rows', 'val', 'test')}, indent=2))
+    report = train(args.dataset_csv, args.out_dir,
+                   TrainConfig(seed=args.seed, tensorboard=not args.no_tensorboard, mirror=args.mirror))
+    print(json.dumps({k: report[k] for k in ('rows', 'val', 'test', 'test_mirrored')}, indent=2))
 
 
 if __name__ == '__main__':

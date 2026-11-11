@@ -35,13 +35,14 @@ def test_split_has_every_opponent_policy_in_every_part():
 
 @pytest.fixture
 def noisy_line(tmp_path):
-    """y_steer = x_a, y_speed = 2 + noise whose std is 0.05 for x_b < 0 and 0.4 for x_b > 0."""
+    """y_steer = x_opp_d, y_speed = 2 + noise whose std is 0.05 for x_opp_vs < 0 and 0.4 for x_opp_vs > 0. Both laws
+    also hold on the mirror image, where the offset and the steering change sign."""
     rng = np.random.default_rng(0)
     n = 6000
     a, b = rng.uniform(-1, 1, n), rng.uniform(-1, 1, n)
     df = pd.DataFrame({
         'episode': [f'ep_{i % 30:02d}' for i in range(n)], 'opp_policy': ['p'] * n,
-        'x_a': a, 'x_b': b,
+        'x_opp_d': a, 'x_opp_vs': b,
         'y_steer_0': a, 'y_speed_0': 2.0 + rng.normal(0, np.where(b < 0, 0.05, 0.4))})
     path = tmp_path / 'dataset.csv'
     df.to_csv(path, index=False)
@@ -114,6 +115,19 @@ def test_a_new_run_replaces_the_old_logs(noisy_line, tmp_path):
     train(noisy_line, tmp_path / 'out', TrainConfig(**SMALL))
     train(noisy_line, tmp_path / 'out', TrainConfig(**SMALL))
     assert len(list((tmp_path / 'out' / 'tensorboard' / 'member_0').glob('events.out.*'))) == 1
+
+
+def test_the_report_also_holds_the_mirror_image_of_the_test_episodes(trained):
+    report = json.loads((trained / 'report.json').read_text())
+    assert report['rows']['test_mirrored'] == report['rows']['test']
+    assert report['test_mirrored']['rmse']['steer'] < 0.1  # the law of the fixture holds on the mirror image too
+
+
+def test_mirroring_adds_the_mirror_image_of_every_train_and_val_row(noisy_line, tmp_path):
+    plain = train(noisy_line, tmp_path / 'plain', TrainConfig(**SMALL, tensorboard=False))
+    mirror = train(noisy_line, tmp_path / 'mirror', TrainConfig(**SMALL, tensorboard=False, mirror=True))
+    assert mirror['rows'] == {**plain['rows'], 'train': 2 * plain['rows']['train'], 'val': 2 * plain['rows']['val']}
+    assert mirror['config']['mirror'] is True
 
 
 def test_the_report_names_the_dataset_of_the_model(trained):
