@@ -37,7 +37,20 @@ def git_info(path: str) -> dict:
 
 
 def sim_running() -> bool:
-    return subprocess.run(['pgrep', '-f', 'gym_bridge'], capture_output=True).returncode == 0
+    """
+    A live gym_bridge. Finished ones that nobody reaped do not count: a container whose init does not reap (e.g.
+    `tail -f /dev/null`) keeps the simulator of every past episode as a zombie.
+    """
+    pids = subprocess.run(['pgrep', '-f', 'gym_bridge'], capture_output=True, text=True).stdout.split()
+    return any(_alive(pid) for pid in pids)
+
+
+def _alive(pid: str) -> bool:
+    try:
+        with open(f'/proc/{pid}/stat') as f:
+            return f.read().rsplit(')', 1)[1].split()[0] != 'Z'  # the state follows the command name in brackets
+    except (FileNotFoundError, IndexError):
+        return False
 
 
 def stop(proc: subprocess.Popen):
