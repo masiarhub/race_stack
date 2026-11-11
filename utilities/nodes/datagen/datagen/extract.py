@@ -189,6 +189,27 @@ def columns_of(entries, ctx, registry, prefix):
     return cols
 
 
+def _earlier(column: str, steps: int) -> str:
+    return f'{column}_m{steps}'
+
+
+def history_columns(names, history: int) -> list:
+    """Column names of the policy input x_{k-history+1} .. x_k, oldest frame first, the current frame last."""
+    return [_earlier(name, j) for j in range(history - 1, 0, -1) for name in names] + list(names)
+
+
+def stack_history(cols, history: int) -> list:
+    """(column, values, unit, description) of one frame -> the same for the frames history_columns names. A value
+    j steps earlier is NaN for the first j samples."""
+    stacked = []
+    for j in range(history - 1, 0, -1):
+        for name, values, unit, desc in cols:
+            shifted = np.full_like(values, np.nan)
+            shifted[j:] = values[:-j]
+            stacked.append((_earlier(name, j), shifted, unit, f'{desc}, {j} step(s) earlier'))
+    return stacked + list(cols)
+
+
 def label_columns(cfg, ctx):
     options = {k: v for k, v in cfg['labels'].items() if k != 'type'}
     return columns_of([{cfg['labels']['type']: options}], ctx, LABELS, 'y')
@@ -274,15 +295,7 @@ def episode_table(ep_dir: str, cfg: dict):
     ctx = Context(cfg['frame'], ref, opp, opp_gt, ego,
                   drive_zoh(bag['/drive'], grid), drive_zoh(bag['/opp_drive'], grid))
 
-    x_cols = columns_of(cfg['features'], ctx, FEATURES, 'x')
-    if cfg['history'] > 1:
-        hist = []
-        for j in range(cfg['history'] - 1, 0, -1):
-            for name, v, unit, desc in x_cols:
-                shifted = np.full_like(v, np.nan)
-                shifted[j:] = v[:-j]
-                hist.append((f'{name}_m{j}', shifted, unit, f'{desc}, {j} step(s) earlier'))
-        x_cols = hist + x_cols
+    x_cols = stack_history(columns_of(cfg['features'], ctx, FEATURES, 'x'), cfg['history'])
     y_cols = label_columns(cfg, ctx)
 
     opp_pol = ep['opp_policy']

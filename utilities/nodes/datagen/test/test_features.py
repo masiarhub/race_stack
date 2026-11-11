@@ -123,3 +123,20 @@ def test_with_slip_turns_the_speed_into_true_body_velocities():
 def test_with_slip_leaves_recordings_without_rollout_state_unchanged():
     odom = odom_moving_at(2.0)
     assert with_slip(odom, []) is odom
+
+
+def test_history_columns_put_the_oldest_frame_first_and_the_current_frame_last():
+    from datagen.extract import history_columns
+    assert history_columns(['x_a', 'x_b'], 3) == ['x_a_m2', 'x_b_m2', 'x_a_m1', 'x_b_m1', 'x_a', 'x_b']
+    assert history_columns(['x_a'], 1) == ['x_a']
+
+
+def test_stacked_history_holds_the_earlier_values_under_the_history_columns():
+    from datagen.extract import history_columns, stack_history
+    frame = [('x_a', np.arange(4.0), 'm', 'a'), ('x_b', 10 + np.arange(4.0), 'm', 'b')]
+    stacked = stack_history(frame, 3)
+    assert [c[0] for c in stacked] == history_columns(['x_a', 'x_b'], 3)
+    values = {c[0]: c[1] for c in stacked}
+    assert np.array_equal(values['x_a_m2'], [np.nan, np.nan, 0.0, 1.0], equal_nan=True)
+    assert np.array_equal(values['x_b_m1'], [np.nan, 10.0, 11.0, 12.0], equal_nan=True)
+    assert np.array_equal(values['x_a'], np.arange(4.0))
