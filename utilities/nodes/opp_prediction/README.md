@@ -25,6 +25,7 @@ export PYTHONPATH=$PWD:$PWD/../datagen:$PWD/../../../base_system/f110_simulator/
 `evaluation_<part>_rho<rho>.json` next to the model: accuracy, calibration and usefulness of the uncertainty, per step
 of the horizon and separately along (s) and across (d) the track, against a constant-velocity baseline.
 
-`python -m opp_prediction.action_plot <run_dir> <model_dir> [--part test] [--episodes ep_0006 ...] [--particles 20]`
-plots one-step action particles (blue) against the recorded actions (green) per held-out episode, steering and speed
-over time, into `<model_dir>/action_plots/`. Every step predicts from the recorded features of its dataset row.
+`python -m opp_prediction.action_plot <run_dir> <model_dir> [--part test] [--episodes ep_0006 ...] [--particles 20]
+[--band 0.9]` plots one-step action particles (blue) against the recorded actions (green) per held-out episode, steering
+and speed over time, into `<model_dir>/action_plots/`. Every step predicts from the recorded features of its dataset row.
+The band encloses the central fraction of the particles at each step (`--band 1` for their hull, `--band 0` for none).
