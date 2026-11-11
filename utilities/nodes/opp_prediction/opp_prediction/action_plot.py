@@ -16,6 +16,8 @@ from opp_prediction.train import ACTIONS
 
 PANELS = ('steer angle [rad]', 'speed command [m/s]')
 GAP_FACTOR = 1.5  # a time step this many times the typical one means dataset rows were dropped
+PARTICLE_COLOR, SIGMA_FILL, SIGMA_LINES = '#08306b', '#c6dbef', '#4292c6'  # dark, light and mid blue
+PARTICLE_INK = 6.0  # opacity summed over the particles of a step, so that many particles do not hide the band
 
 
 def _break_at_gaps(t, values):
@@ -36,18 +38,37 @@ def sample_actions(ensemble, inputs, particles: int, rng) -> np.ndarray:
 
 
 def plot_actions(t, truth, particles, title=None) -> Figure:
-    """t [N], truth [N, 2], particles [N, P, 2] -> one panel per action over time: the recorded action as a green line
-    on top of the particles as faint blue dots. The line breaks where dataset rows are missing."""
+    """t [N], truth [N, 2], particles [N, P, 2] -> one panel per action over time. From bottom to top: the space between
+    the mean -/+ one standard deviation of the particles filled light blue, the curves through these bounds with a
+    vertical line between them at each step, the particles as dark blue dots, their mean as a red line and the
+    recorded action as a green line. Lines and fill break where dataset rows are missing."""
     fig = Figure(figsize=(12, 6), layout='constrained')
     axes = fig.subplots(2, 1, sharex=True)
+    t, particles = np.asarray(t), np.asarray(particles)
+    mean, std = particles.mean(1), particles.std(1, ddof=1)
+    curve_t, truth_line = _break_at_gaps(t, np.asarray(truth))
+    _, mean_line = _break_at_gaps(t, mean)
+    _, lower_line = _break_at_gaps(t, mean - std)
+    _, upper_line = _break_at_gaps(t, mean + std)
     times = np.repeat(t, particles.shape[1])
-    line_t, line = _break_at_gaps(np.asarray(t), np.asarray(truth))
     for a, (ax, label) in enumerate(zip(axes, PANELS)):
-        ax.scatter(times, particles[..., a].ravel(), s=4, color='tab:blue', alpha=0.15, linewidths=0, label='particles')
-        ax.plot(line_t, line[:, a], color='tab:green', linewidth=1.2, label='ground truth')
+        ax.fill_between(curve_t, lower_line[:, a], upper_line[:, a], facecolor=SIGMA_FILL, linewidth=0, zorder=1,
+                        gid='sigma_band', label='±1σ of particles')
+        ax.vlines(t, mean[:, a] - std[:, a], mean[:, a] + std[:, a], color=SIGMA_LINES, linewidth=0.5, zorder=1.5,
+                  gid='sigma_bars')
+        for gid, bound in (('sigma_lower', lower_line), ('sigma_upper', upper_line)):
+            ax.plot(curve_t, bound[:, a], color=SIGMA_LINES, linewidth=1.0, zorder=1.5, gid=gid)
+        ax.scatter(times, particles[..., a].ravel(), s=4, color=PARTICLE_COLOR,
+                   alpha=min(0.3, PARTICLE_INK / particles.shape[1]), linewidths=0, zorder=2,
+                   gid='particles', label='particles')
+        ax.plot(curve_t, mean_line[:, a], color='tab:red', linewidth=1.2, zorder=3, gid='mean', label='particle mean')
+        ax.plot(curve_t, truth_line[:, a], color='tab:green', linewidth=1.2, zorder=4, gid='truth', label='ground truth')
         ax.set_ylabel(label)
         ax.grid(alpha=0.3)
-    axes[0].legend(loc='upper right', markerscale=3)
+    legend = fig.legend(*axes[0].get_legend_handles_labels(), loc='outside lower center', ncols=4, markerscale=3)
+    for handle in legend.legend_handles:
+        if handle.get_label() == 'particles':
+            handle.set_alpha(1.0)  # the faint particles would hardly show in the legend
     axes[-1].set_xlabel('time [s]')
     if title:
         fig.suptitle(title)

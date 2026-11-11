@@ -4,11 +4,12 @@ import matplotlib
 import numpy as np
 import pandas as pd
 import torch
+from matplotlib.collections import LineCollection, PolyCollection
 
 from opp_prediction.action_plot import plot_actions, plot_episodes, sample_actions
 from opp_prediction.ensemble import Ensemble
 
-GREEN, BLUE = matplotlib.colors.to_rgba('tab:green'), matplotlib.colors.to_rgba('tab:blue')
+GREEN, RED, BLUE = (matplotlib.colors.to_rgba(c) for c in ('tab:green', 'tab:red', 'tab:blue'))
 
 
 class FixedEnsemble:
@@ -47,8 +48,24 @@ def test_sampling_is_seeded():
 def plotted():
     t = np.arange(10) * 0.05
     truth = np.stack([np.sin(t), 3 + t], axis=1)
-    particles = truth[:, None] + np.random.default_rng(0).normal(0, 0.1, (10, 4, 2))
+    particles = truth[:, None] + np.random.default_rng(0).normal(0, 0.1, (10, 40, 2))
     return plot_actions(t, truth, particles, title='ep_0001'), t, truth, particles
+
+
+def artist(ax, gid):
+    found = [a for a in ax.get_children() if a.get_gid() == gid]
+    assert len(found) == 1, f'{len(found)} artists {gid}'
+    return found[0]
+
+
+def luminance(color):
+    r, g, b, _ = matplotlib.colors.to_rgba(color)
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def one_sigma(particles, a):
+    mean, std = particles[..., a].mean(1), particles[..., a].std(1, ddof=1)
+    return mean - std, mean, mean + std
 
 
 def test_one_panel_per_action_on_a_shared_time_axis():
@@ -58,16 +75,65 @@ def test_one_panel_per_action_on_a_shared_time_axis():
     assert 'steer' in steer.get_ylabel() and 'speed' in speed.get_ylabel()
 
 
-def test_truth_is_a_green_line_and_particles_are_blue_dots():
-    fig, t, truth, particles = plotted()
+def test_truth_is_a_green_line():
+    fig, t, truth, _ = plotted()
     for a, ax in enumerate(fig.axes):
-        line, = ax.get_lines()
+        line = artist(ax, 'truth')
         np.testing.assert_array_equal(line.get_xydata(), np.stack([t, truth[:, a]], axis=1))
         assert matplotlib.colors.to_rgba(line.get_color()) == GREEN
-        dots, = ax.collections
-        assert len(dots.get_offsets()) == particles[..., a].size
+
+
+def test_particles_are_dots_darker_than_tab_blue():
+    fig, _, _, particles = plotted()
+    for a, ax in enumerate(fig.axes):
+        dots = artist(ax, 'particles')
         np.testing.assert_allclose(dots.get_offsets()[:, 1], particles[..., a].ravel())
-        assert tuple(dots.get_facecolor()[0][:3]) == BLUE[:3]
+        assert luminance(dots.get_facecolor()[0]) < luminance(BLUE)
+
+
+def test_mean_is_a_red_line_through_the_mean_of_the_particles():
+    fig, t, _, particles = plotted()
+    for a, ax in enumerate(fig.axes):
+        line = artist(ax, 'mean')
+        np.testing.assert_allclose(line.get_xydata(), np.stack([t, one_sigma(particles, a)[1]], axis=1))
+        assert matplotlib.colors.to_rgba(line.get_color()) == RED
+
+
+def test_sigma_curves_go_through_the_mean_minus_and_plus_one_std():
+    fig, _, _, particles = plotted()
+    for a, ax in enumerate(fig.axes):
+        lower, _, upper = one_sigma(particles, a)
+        np.testing.assert_allclose(artist(ax, 'sigma_lower').get_ydata(), lower)
+        np.testing.assert_allclose(artist(ax, 'sigma_upper').get_ydata(), upper)
+
+
+def test_one_vertical_sigma_line_per_step():
+    fig, t, _, particles = plotted()
+    for a, ax in enumerate(fig.axes):
+        bars = artist(ax, 'sigma_bars')
+        assert isinstance(bars, LineCollection)
+        lower, _, upper = one_sigma(particles, a)
+        expected = np.stack([np.stack([t, lower], axis=1), np.stack([t, upper], axis=1)], axis=1)
+        np.testing.assert_allclose(np.array(bars.get_segments()), expected)
+
+
+def test_space_between_the_sigma_curves_is_light_blue():
+    fig, t, _, particles = plotted()
+    for a, ax in enumerate(fig.axes):
+        band = artist(ax, 'sigma_band')
+        assert isinstance(band, PolyCollection)
+        vertices = np.concatenate([path.vertices for path in band.get_paths()])
+        lower, _, upper = one_sigma(particles, a)
+        np.testing.assert_allclose([vertices[np.isclose(vertices[:, 0], x), 1].min() for x in t], lower)
+        np.testing.assert_allclose([vertices[np.isclose(vertices[:, 0], x), 1].max() for x in t], upper)
+        assert luminance(band.get_facecolor()[0]) > luminance(BLUE)
+
+
+def test_band_under_particles_under_mean_under_truth():
+    fig, *_ = plotted()
+    ax = fig.axes[0]
+    order = [artist(ax, gid).get_zorder() for gid in ('sigma_band', 'particles', 'mean', 'truth')]
+    assert order == sorted(order) and len(set(order)) == 4
 
 
 def run_with_model(tmp_path):
@@ -94,10 +160,11 @@ def test_named_episodes_override_the_part(tmp_path):
     assert [p.name for p in plot_episodes(run_dir, model_dir, episodes=['ep_0'], particles=3)] == ['actions_ep_0.png']
 
 
-def test_truth_line_breaks_where_dataset_rows_are_missing():
+def test_lines_and_band_break_where_dataset_rows_are_missing():
     t = np.array([0.0, 0.05, 0.1, 0.4, 0.45])  # rows between 0.1 and 0.4 were dropped
-    truth = np.ones((5, 2))
-    fig = plot_actions(t, truth, np.ones((5, 2, 2)))
+    fig = plot_actions(t, np.ones((5, 2)), np.random.default_rng(0).normal(size=(5, 4, 2)))
     for ax in fig.axes:
-        y = ax.get_lines()[0].get_ydata()
-        assert np.isnan(y).sum() == 1 and np.isnan(y[3])
+        for gid in ('truth', 'mean', 'sigma_lower', 'sigma_upper'):
+            y = artist(ax, gid).get_ydata()
+            assert np.isnan(y).sum() == 1 and np.isnan(y[3]), gid
+        assert len(artist(ax, 'sigma_band').get_paths()) == 2

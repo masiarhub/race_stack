@@ -26,5 +26,6 @@ export PYTHONPATH=$PWD:$PWD/../datagen:$PWD/../../../base_system/f110_simulator/
 of the horizon and separately along (s) and across (d) the track, against a constant-velocity baseline.
 
 `python -m opp_prediction.action_plot <run_dir> <model_dir> [--part test] [--episodes ep_0006 ...] [--particles 20]`
-plots one-step action particles (blue) against the recorded actions (green) per held-out episode, steering and speed
-over time, into `<model_dir>/action_plots/`. Every step predicts from the recorded features of its dataset row.
+plots one-step action particles (dark blue), their mean (red) and their ±1σ (light blue, with a vertical line per step)
+against the recorded actions (green) per held-out episode, steering and speed over time, into
+`<model_dir>/action_plots/`. Every step predicts from the recorded features of its dataset row.
