@@ -7,10 +7,9 @@ import numpy as np
 from rosbags.rosbag2 import Reader
 from rosbags.typesys import Stores, get_types_from_msg, get_typestore
 
-from datagen.extract import physics_steps_ns, time_grid
+from datagen.extract import OPP_STATE_TOPICS, PHYSICS_STEP_TOPICS, first_recorded, physics_steps_ns, time_grid
 
-OPP_STATE, OPP_DRIVE, EGO_PLAN = '/opp_racecar/rollout_state', '/opp_drive', '/local_waypoints'
-STEP_TOPICS = ('/sim/collision/walls', '/sim/collisions')
+OPP_DRIVE, EGO_PLAN = '/opp_drive', '/local_waypoints'
 ACKERMANN_DRIVE = 'float32 steering_angle\nfloat32 steering_angle_velocity\nfloat32 speed\nfloat32 acceleration\nfloat32 jerk'
 ACKERMANN_STAMPED = 'std_msgs/Header header\nackermann_msgs/AckermannDrive drive'
 
@@ -53,15 +52,15 @@ def load_recording(episode_dir, dataset_cfg: dict, f110_msgs_dir) -> Recording:
     episode_dir = pathlib.Path(episode_dir)
     plan = json.loads((episode_dir / 'episode.json').read_text())
     result = json.loads((episode_dir / 'result.json').read_text())
-    bag = _read(episode_dir / 'bag', _typestore(f110_msgs_dir), [OPP_STATE, OPP_DRIVE, EGO_PLAN, *STEP_TOPICS])
+    bag = _read(episode_dir / 'bag', _typestore(f110_msgs_dir), [*OPP_STATE_TOPICS, OPP_DRIVE, EGO_PLAN, *PHYSICS_STEP_TOPICS])
     cut_end_s = dataset_cfg['drop_before_collision_s'] if result['reason'] == 'collision' else 0.0
     grid = time_grid(result['t0_ns'], result['t_end_ns'], physics_steps_ns(bag), dataset_cfg['dt'],
                      plan['rules']['warmup_s'], cut_end_s)
-    waypoints = bag[EGO_PLAN]
+    waypoints, opp_states = bag[EGO_PLAN], first_recorded(bag, OPP_STATE_TOPICS)
     return Recording(
         name=plan['name'], track=plan['track'], grid_ns=grid.wall_ns,
-        opp_t=np.array([t for t, _ in bag[OPP_STATE]], dtype=np.int64),
-        opp_states=np.array([m.data for _, m in bag[OPP_STATE]]),
+        opp_t=np.array([t for t, _ in opp_states], dtype=np.int64),
+        opp_states=np.array([m.data for _, m in opp_states]),
         cmd_t=np.array([t for t, _ in bag[OPP_DRIVE]], dtype=np.int64),
         commands=np.array([[m.drive.steering_angle, m.drive.speed] for _, m in bag[OPP_DRIVE]]),
         plan_t=np.array([t for t, _ in waypoints], dtype=np.int64),

@@ -62,3 +62,13 @@ def test_physics_steps_come_from_the_wall_topic_or_the_older_combined_topic():
     assert physics_steps_ns(new).tolist() == [5, 7]
     assert physics_steps_ns(old).tolist() == [1, 2, 3]
     assert physics_steps_ns({}).size == 0
+
+
+def test_single_track_states_come_from_the_upstream_names_or_the_older_rollout_state_names():
+    from datagen.extract import EGO_STATE_TOPICS, OPP_STATE_TOPICS, first_recorded
+    both = {'/sim/state/opp': [(5, 'new')], '/opp_racecar/rollout_state': [(1, 'old')]}
+    old = {'/sim/state/opp': [], '/rollout_state': [(1, 'ego')], '/opp_racecar/rollout_state': [(1, 'old')]}
+    assert first_recorded(both, OPP_STATE_TOPICS) == [(5, 'new')]
+    assert first_recorded(old, OPP_STATE_TOPICS) == [(1, 'old')]
+    assert first_recorded(old, EGO_STATE_TOPICS) == [(1, 'ego')]
+    assert first_recorded({}, EGO_STATE_TOPICS) == []

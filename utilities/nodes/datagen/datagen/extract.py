@@ -37,6 +37,10 @@ TRACKER_LINE = 'raceline'
 # after the start gate the bridge advances the physics once per tick and publishes these once per tick;
 # /sim/collisions is the combined collision topic of runs recorded before the car / wall split
 PHYSICS_STEP_TOPICS = ('/sim/collision/walls', '/sim/collisions')
+# single-track state of each car, once per physics step; /rollout_state are the names of runs recorded before
+# the topics were renamed upstream to /sim/state/*
+EGO_STATE_TOPICS = ('/sim/state/ego', '/rollout_state')
+OPP_STATE_TOPICS = ('/sim/state/opp', '/opp_racecar/rollout_state')
 PHYSICS_DT_S = 0.01  # [s] physics time step of the gym
 ROLLOUT_STATE_SLIP = 6  # index of the slip angle in [x, y, steer_angle, vel, yaw_angle, yaw_rate, slip_angle]
 
@@ -225,12 +229,17 @@ def time_grid(t0_ns: int, t_end_ns: int, step_ns, dt: float, warmup_s: float, cu
     return Grid(np.round(np.interp(t_s, sim, wall)).astype(np.int64), t_s)
 
 
+def first_recorded(bag: dict, topics) -> list:
+    """Messages of the first of the alternative names of one topic that the bag holds, [] if it holds none."""
+    for topic in topics:
+        if bag.get(topic):
+            return bag[topic]
+    return []
+
+
 def physics_steps_ns(bag: dict) -> np.ndarray:
     """Recording times of the physics steps (ticks) of an episode."""
-    for topic in PHYSICS_STEP_TOPICS:
-        if bag.get(topic):
-            return np.array([m[0] for m in bag[topic]], dtype=np.int64)
-    return np.zeros(0, dtype=np.int64)
+    return np.array([m[0] for m in first_recorded(bag, PHYSICS_STEP_TOPICS)], dtype=np.int64)
 
 
 def load_episode(ep_dir: str, cfg: dict, topics: list) -> Episode:
@@ -248,13 +257,13 @@ def load_episode(ep_dir: str, cfg: dict, topics: list) -> Episode:
 
 def episode_table(ep_dir: str, cfg: dict):
     episode = load_episode(ep_dir, cfg, ['/state_estimation/odom', '/opp_racecar/odom', '/perception/obstacles',
-                                         '/drive', '/opp_drive', '/rollout_state', '/opp_racecar/rollout_state'])
+                                         '/drive', '/opp_drive', *EGO_STATE_TOPICS, *OPP_STATE_TOPICS])
     ep, bag, grid = episode.plan, episode.bag, episode.grid.wall_ns
     wpnts = os.path.join(ep['map_dir'], 'global_waypoints.json')
     ref = Track.from_json(wpnts, cfg['reference'])
     tracker_line = Track.from_json(wpnts, TRACKER_LINE)
-    ego_odom = with_slip(odom_arrays(bag['/state_estimation/odom']), bag['/rollout_state'])
-    opp_odom = with_slip(odom_arrays(bag['/opp_racecar/odom']), bag['/opp_racecar/rollout_state'])
+    ego_odom = with_slip(odom_arrays(bag['/state_estimation/odom']), first_recorded(bag, EGO_STATE_TOPICS))
+    opp_odom = with_slip(odom_arrays(bag['/opp_racecar/odom']), first_recorded(bag, OPP_STATE_TOPICS))
     if grid.size == 0:
         return None, [], {'rows': 0, 'note': 'episode shorter than the warm-up'}
 

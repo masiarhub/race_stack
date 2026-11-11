@@ -34,8 +34,10 @@ EPISODE_DEFAULTS = {
 RECORD_TOPICS = [
     '/state_estimation/odom',       # ego ground truth (sim)
     '/opp_racecar/odom',            # opponent ground truth (sim)
-    '/rollout_state',               # ego full single-track state (sim)
-    '/opp_racecar/rollout_state',   # opponent full single-track state (sim), initial state of the rollout
+    '/sim/state/ego',               # ego full single-track state (sim)
+    '/sim/state/opp',               # opponent full single-track state (sim), initial state of the rollout
+    '/rollout_state',               # the same two under their names before the upstream rename
+    '/opp_racecar/rollout_state',
     '/local_waypoints',             # ego plan, supplies the future ego states of the rollout
     '/opp_racecar/opp_odom',        # the ego as a python opponent policy observes it
     '/perception/obstacles',        # ego's tracker estimate of the opponent

@@ -45,5 +45,6 @@ def test_uniform_step():
 
 
 def test_records_what_the_rollout_needs():
-    for topic in ('/rollout_state', '/opp_racecar/rollout_state', '/local_waypoints'):
+    for topic in ('/sim/state/ego', '/sim/state/opp', '/rollout_state', '/opp_racecar/rollout_state',
+                  '/local_waypoints'):
         assert topic in RECORD_TOPICS
