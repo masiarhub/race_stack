@@ -11,7 +11,7 @@ from datagen.rollout import RolloutModel
 from datagen.track import Track
 from opp_prediction.ensemble import Ensemble
 from opp_prediction.metrics import summarize
-from opp_prediction.predict import PREDICTION_DT_S, EgoPlan, Predictor, project
+from opp_prediction.predict import PREDICTION_DT_S, RHO, EgoPlan, Predictor, project
 from opp_prediction.recording import Recording, load_recording
 from opp_prediction.train import trained_on
 
@@ -72,7 +72,7 @@ def rollout_errors(rec: Recording, predictor, track, horizon: int, start_rows, p
     return Errors(np.array(particle_errors), np.array(baseline_errors), members)
 
 
-def evaluate(run_dir, model_dir, part: str = 'test', stride: int = 5, horizon: int = 60, rho: float = 0.0,
+def evaluate(run_dir, model_dir, part: str = 'test', stride: int = 5, horizon: int = 60, rho: float = RHO,
              seed: int = 0) -> dict:
     run_dir, model_dir = pathlib.Path(run_dir), pathlib.Path(model_dir)
     dataset, cfg = trained_on(run_dir, model_dir)
@@ -107,7 +107,7 @@ def main():
     parser.add_argument('model_dir')
     parser.add_argument('--part', default='test', choices=['train', 'val', 'test'])
     parser.add_argument('--stride', type=int, default=5, help='start a prediction at every n-th dataset row')
-    parser.add_argument('--rho', type=float, default=0.0)
+    parser.add_argument('--rho', type=float, default=RHO, help='correlation of the action noise between steps')
     args = parser.parse_args()
     report = evaluate(args.run_dir, args.model_dir, args.part, args.stride, rho=args.rho)
     print(json.dumps(report['steps'], indent=2))

@@ -17,6 +17,8 @@ from datagen.rollout import PHYSICS_STEPS_PER_PREDICTION
 
 PREDICTION_DT_S = PHYSICS_STEPS_PER_PREDICTION * PHYSICS_DT_S
 MIN_PLAN_SPEED = 0.05  # [m/s] keeps the time between waypoints finite for a standing plan
+RHO = 0.8  # the policy's errors persist for ~8-11 prediction steps (h2h_v1, history 3): an AR(1) noise with the same
+           # integrated autocorrelation time
 
 
 class Particles(NamedTuple):
@@ -56,7 +58,7 @@ def project(track, rollout_states) -> dict:
 
 
 class Predictor:
-    def __init__(self, ensemble, rollout_model, features, particles: int = 20, rho: float = 0.0, seed=None):
+    def __init__(self, ensemble, rollout_model, features, particles: int = 20, rho: float = RHO, seed=None):
         self.ensemble, self.rollout_model, self.features = ensemble, rollout_model, features
         self.particles, self.rho = particles, rho
         self.rng = np.random.default_rng(seed)
