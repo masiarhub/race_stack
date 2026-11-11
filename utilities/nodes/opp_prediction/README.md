@@ -24,3 +24,7 @@ export PYTHONPATH=$PWD:$PWD/../datagen:$PWD/../../../base_system/f110_simulator/
 `python -m opp_prediction.evaluate <run_dir> <model_dir>` predicts on the held-out episodes of a run and writes
 `evaluation_<part>_rho<rho>.json` next to the model: accuracy, calibration and usefulness of the uncertainty, per step
 of the horizon and separately along (s) and across (d) the track, against a constant-velocity baseline.
+
+`python -m opp_prediction.action_plot <run_dir> <model_dir> [--part test] [--episodes ep_0006 ...] [--particles 20]`
+plots one-step action particles (blue) against the recorded actions (green) per held-out episode, steering and speed
+over time, into `<model_dir>/action_plots/`. Every step predicts from the recorded features of its dataset row.
