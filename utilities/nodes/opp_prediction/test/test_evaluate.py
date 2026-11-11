@@ -22,6 +22,7 @@ def motion(n_steps=400):
     states = np.stack([x, y, np.zeros(n_steps), np.ones(n_steps), yaw, np.zeros(n_steps), np.zeros(n_steps)], axis=1)
     return Recording(name='ep', track='t', grid_ns=np.arange(0, n_steps * STEP_NS, DT_NS, dtype=np.int64),
                      opp_t=t, opp_states=states, cmd_t=t, commands=np.tile([0.0, 1.0], (n_steps, 1)),
+                     ego_t=t, ego_speed=np.linspace(0.5, 1.5, n_steps),
                      plan_t=t[:1], plan_x=x[:1:][None].repeat(3, 1), plan_y=y[:1:][None].repeat(3, 1),
                      plan_speed=np.ones((1, 3)))
 
@@ -31,10 +32,11 @@ class PerfectPredictor:
 
     def __init__(self, recording, offset=0.0):
         self.rec, self.offset = recording, offset
-        self.past_inputs = []
+        self.past_inputs, self.ego_plans = [], []
 
     def predict(self, xi_0, ego_plan, track, horizon, previous_steer, past_inputs=None):
         self.past_inputs.append(past_inputs)
+        self.ego_plans.append(ego_plan)
         start = int(np.argmin(np.hypot(*(self.rec.opp_states[:, :2] - np.asarray(xi_0)[:2]).T)))
         states = self.rec.opp_states[start::5][:horizon + 1].copy()
         states[:, 0] += self.offset
@@ -83,3 +85,11 @@ def test_the_observed_frames_of_a_row_are_its_history_columns_oldest_first():
     frames = observed_frames(rows, list(rows.columns), history=3)
     assert frames.tolist() == [[[1.0, 2.0], [3.0, 4.0]]]
     assert observed_frames(rows[['x_a', 'x_b']], ['x_a', 'x_b'], history=1).shape == (1, 0, 2)
+
+
+def test_the_ego_plan_starts_at_the_ego_speed_measured_at_each_start_row():
+    rec = motion()
+    predictor = PerfectPredictor(rec)
+    rollout_errors(rec, predictor, TRACK, horizon=2, start_rows=np.array([0, 5]))
+    measured = rec.ego_speed[[0, 25]]  # grid rows 0 and 5 are physics steps 0 and 25
+    assert [plan.speed[0] for plan in predictor.ego_plans] == pytest.approx(measured)

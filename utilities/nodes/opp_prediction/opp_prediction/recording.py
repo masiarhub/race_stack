@@ -7,9 +7,10 @@ import numpy as np
 from rosbags.rosbag2 import Reader
 from rosbags.typesys import Stores, get_types_from_msg, get_typestore
 
-from datagen.extract import OPP_STATE_TOPICS, PHYSICS_STEP_TOPICS, first_recorded, physics_steps_ns, time_grid
+from datagen.extract import OPP_STATE_TOPICS, PHYSICS_STEP_TOPICS, first_recorded, odom_arrays, physics_steps_ns, \
+    time_grid
 
-OPP_DRIVE, EGO_PLAN = '/opp_drive', '/local_waypoints'
+OPP_DRIVE, EGO_PLAN, EGO_ODOM = '/opp_drive', '/local_waypoints', '/state_estimation/odom'
 ACKERMANN_DRIVE = 'float32 steering_angle\nfloat32 steering_angle_velocity\nfloat32 speed\nfloat32 acceleration\nfloat32 jerk'
 ACKERMANN_STAMPED = 'std_msgs/Header header\nackermann_msgs/AckermannDrive drive'
 
@@ -23,6 +24,8 @@ class Recording:
     opp_states: np.ndarray  # [n, 7] rollout state of the opponent, one per physics step
     cmd_t: np.ndarray
     commands: np.ndarray    # [n, 2] steering and speed commands of the opponent
+    ego_t: np.ndarray
+    ego_speed: np.ndarray   # [n] speed of the ego from its own state estimation
     plan_t: np.ndarray
     plan_x: np.ndarray      # [n, waypoints] ego plan, map frame
     plan_y: np.ndarray
@@ -52,17 +55,19 @@ def load_recording(episode_dir, dataset_cfg: dict, f110_msgs_dir) -> Recording:
     episode_dir = pathlib.Path(episode_dir)
     plan = json.loads((episode_dir / 'episode.json').read_text())
     result = json.loads((episode_dir / 'result.json').read_text())
-    bag = _read(episode_dir / 'bag', _typestore(f110_msgs_dir), [*OPP_STATE_TOPICS, OPP_DRIVE, EGO_PLAN, *PHYSICS_STEP_TOPICS])
+    bag = _read(episode_dir / 'bag', _typestore(f110_msgs_dir), [*OPP_STATE_TOPICS, OPP_DRIVE, EGO_PLAN, EGO_ODOM,
+                                                             *PHYSICS_STEP_TOPICS])
     cut_end_s = dataset_cfg['drop_before_collision_s'] if result['reason'] == 'collision' else 0.0
     grid = time_grid(result['t0_ns'], result['t_end_ns'], physics_steps_ns(bag), dataset_cfg['dt'],
                      plan['rules']['warmup_s'], cut_end_s)
-    waypoints, opp_states = bag[EGO_PLAN], first_recorded(bag, OPP_STATE_TOPICS)
+    waypoints, opp_states, ego = bag[EGO_PLAN], first_recorded(bag, OPP_STATE_TOPICS), odom_arrays(bag[EGO_ODOM])
     return Recording(
         name=plan['name'], track=plan['track'], grid_ns=grid.wall_ns,
         opp_t=np.array([t for t, _ in opp_states], dtype=np.int64),
         opp_states=np.array([m.data for _, m in opp_states]),
         cmd_t=np.array([t for t, _ in bag[OPP_DRIVE]], dtype=np.int64),
         commands=np.array([[m.drive.steering_angle, m.drive.speed] for _, m in bag[OPP_DRIVE]]),
+        ego_t=ego['t'], ego_speed=np.hypot(ego['vx_b'], ego['vy_b']),
         plan_t=np.array([t for t, _ in waypoints], dtype=np.int64),
         plan_x=np.array([[w.x_m for w in m.wpnts] for _, m in waypoints]),
         plan_y=np.array([[w.y_m for w in m.wpnts] for _, m in waypoints]),
