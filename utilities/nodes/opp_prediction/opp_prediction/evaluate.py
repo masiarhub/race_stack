@@ -33,16 +33,26 @@ def _frenet_error(track, s, d, s_true, d_true):
     return np.stack([track.wrap_ds(s - s_true), d - d_true], axis=-1)
 
 
-def rollout_errors(rec: Recording, predictor, track, horizon: int, start_rows) -> Errors:
-    """Predicts from each start row of the dataset grid. Steps past the end of the episode stay NaN."""
+def observed_frames(rows, input_columns, history: int) -> np.ndarray:
+    """Dataset rows -> [rows, history - 1, features]: the frames each row holds before its current one."""
+    features = len(input_columns) // history
+    return rows[input_columns[:len(input_columns) - features]].to_numpy().reshape(len(rows), history - 1, features)
+
+
+def rollout_errors(rec: Recording, predictor, track, horizon: int, start_rows, past_inputs=None) -> Errors:
+    """
+    Predicts from each start row of the dataset grid. Steps past the end of the episode stay NaN.
+    past_inputs: [start rows, history - 1, features] frames observed before each start, for an ensemble with history.
+    """
     particle_errors, baseline_errors, members = [], [], None
-    for row in start_rows:
+    for i, row in enumerate(start_rows):
         t0 = rec.grid_ns[row]
         xi_0 = rec.opp_states[_at_or_before(rec.opp_t, t0)]
         plan = _at_or_before(rec.plan_t, t0)
         previous_steer = float(rec.commands[_at_or_before(rec.cmd_t, t0), 0])
         result = predictor.predict(xi_0, EgoPlan(rec.plan_x[plan], rec.plan_y[plan], rec.plan_speed[plan]), track,
-                                   horizon=horizon, previous_steer=previous_steer)
+                                   horizon=horizon, previous_steer=previous_steer,
+                                   past_inputs=None if past_inputs is None else past_inputs[i])
         members = result.members
         start = project(track, xi_0[None])
         particles = np.full((len(members), horizon, 2), np.nan)
@@ -68,8 +78,9 @@ def evaluate(run_dir, model_dir, part: str = 'test', stride: int = 5, horizon: i
     dataset, cfg = trained_on(run_dir, model_dir)
     episodes = json.loads((model_dir / 'report.json').read_text())['episodes'][part]
     sim = yaml.safe_load((REPO / 'stack_master/config/SIM/sim_params.yaml').read_text())
-    predictor = Predictor(Ensemble.load(model_dir / 'ensemble.pt'), RolloutModel({k: float(v) for k, v in sim.items()}),
-                          cfg['features'], rho=rho, seed=seed)
+    ensemble = Ensemble.load(model_dir / 'ensemble.pt')
+    predictor = Predictor(ensemble, RolloutModel({k: float(v) for k, v in sim.items()}), cfg['features'], rho=rho,
+                          seed=seed)
     tracks, results = {}, []
     for episode in episodes:
         rec = load_recording(run_dir / 'episodes' / episode, cfg, REPO / 'utilities/libraries/f110_msgs/msg')
@@ -77,8 +88,10 @@ def evaluate(run_dir, model_dir, part: str = 'test', stride: int = 5, horizon: i
             waypoints = REPO / 'stack_master/maps' / rec.track / 'global_waypoints.json'
             tracks[rec.track] = Track.from_json(str(waypoints), cfg['reference'])
         warmup = json.loads((run_dir / 'episodes' / episode / 'episode.json').read_text())['rules']['warmup_s']
-        rows = np.round((dataset[dataset['episode'] == episode]['t'].to_numpy() - warmup) / cfg['dt']).astype(int)
-        results.append(rollout_errors(rec, predictor, tracks[rec.track], horizon, rows[::stride]))
+        starts = dataset[dataset['episode'] == episode].iloc[::stride]
+        rows = np.round((starts['t'].to_numpy() - warmup) / cfg['dt']).astype(int)
+        past = observed_frames(starts, ensemble.input_columns, cfg['history'])
+        results.append(rollout_errors(rec, predictor, tracks[rec.track], horizon, rows, past))
 
     errors = np.concatenate([r.particles for r in results])
     baseline = np.concatenate([r.baseline for r in results])

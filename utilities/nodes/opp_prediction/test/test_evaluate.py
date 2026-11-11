@@ -1,7 +1,9 @@
 import numpy as np
 import pytest
 
-from opp_prediction.evaluate import rollout_errors
+import pandas as pd
+
+from opp_prediction.evaluate import observed_frames, rollout_errors
 from opp_prediction.predict import Particles
 from opp_prediction.recording import Recording
 from test_track import circle
@@ -29,8 +31,10 @@ class PerfectPredictor:
 
     def __init__(self, recording, offset=0.0):
         self.rec, self.offset = recording, offset
+        self.past_inputs = []
 
-    def predict(self, xi_0, ego_plan, track, horizon, previous_steer):
+    def predict(self, xi_0, ego_plan, track, horizon, previous_steer, past_inputs=None):
+        self.past_inputs.append(past_inputs)
         start = int(np.argmin(np.hypot(*(self.rec.opp_states[:, :2] - np.asarray(xi_0)[:2]).T)))
         states = self.rec.opp_states[start::5][:horizon + 1].copy()
         states[:, 0] += self.offset
@@ -64,3 +68,18 @@ def test_steps_past_the_end_of_the_recording_have_no_error_value():
     assert np.isnan(errors.particles[0, 0, -1, 0])
     assert not np.isnan(errors.particles[0, 0, 0, 0])
     assert np.isnan(errors.baseline[0, -1, 0])
+
+
+def test_each_start_row_hands_its_observed_frames_to_the_predictor():
+    rec = motion()
+    predictor = PerfectPredictor(rec)
+    past = np.arange(2 * 2 * 3, dtype=float).reshape(2, 2, 3)
+    rollout_errors(rec, predictor, TRACK, horizon=2, start_rows=np.array([0, 5]), past_inputs=past)
+    assert [p.tolist() for p in predictor.past_inputs] == past.tolist()
+
+
+def test_the_observed_frames_of_a_row_are_its_history_columns_oldest_first():
+    rows = pd.DataFrame({'x_a_m2': [1.0], 'x_b_m2': [2.0], 'x_a_m1': [3.0], 'x_b_m1': [4.0], 'x_a': [5.0], 'x_b': [6.0]})
+    frames = observed_frames(rows, list(rows.columns), history=3)
+    assert frames.tolist() == [[[1.0, 2.0], [3.0, 4.0]]]
+    assert observed_frames(rows[['x_a', 'x_b']], ['x_a', 'x_b'], history=1).shape == (1, 0, 2)
