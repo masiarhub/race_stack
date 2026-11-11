@@ -6,11 +6,17 @@ Catalog of features (x) and labels (y). The representation is chosen by the data
 
 Each feature returns a list of (column, values, unit, description). Add a feature by decorating a function
 with @feature; it receives the Context and the options given in the spec ({curvature: {n: 10}}).
+
+Every feature and label also declares how its columns change on the mirror image of the track (map y -> -y),
+as {column pattern: rule}: 'even' keeps the value, 'odd' changes its sign, another column name swaps the two.
 """
+import fnmatch
+
 import numpy as np
 
 FEATURES = {}
 LABELS = {}
+MIRROR = {'x': {}, 'y': {}}  # role -> {column pattern: rule}
 
 
 class Context:
@@ -22,18 +28,38 @@ class Context:
         self.ego_cmd, self.opp_cmd = ego_cmd, opp_cmd       # dicts with steer, speed
 
 
-def feature(name):
+def feature(name, mirror: dict):
     def register(fn):
         FEATURES[name] = fn
+        MIRROR['x'].update(mirror)
         return fn
     return register
 
 
-def label(name):
+def label(name, mirror: dict):
     def register(fn):
         LABELS[name] = fn
+        MIRROR['y'].update(mirror)
         return fn
     return register
+
+
+def mirror_rule(role: str, column: str) -> str:
+    """How a feature (role 'x') or label ('y') column changes on the mirror image: 'even', 'odd' or the column to swap
+    with. Raises for a column that no feature or label declares, or that two declare differently."""
+    rules = {rule for pattern, rule in MIRROR[role].items() if fnmatch.fnmatchcase(column, pattern)}
+    if len(rules) != 1:
+        raise ValueError(f"no single mirror rule for the {role} column '{column}': {sorted(rules) or 'none declared'}")
+    return rules.pop()
+
+
+# position and velocity components: along the line and along x keep their value, across the line and along y flip
+COMPONENTS = (('s', 'even'), ('d', 'odd'), ('vs', 'even'), ('vd', 'odd'),
+              ('x', 'even'), ('y', 'odd'), ('vx', 'even'), ('vy', 'odd'))
+
+
+def _mirror(who: str) -> dict:
+    return {f'{who}_{c}': rule for c, rule in COMPONENTS}
 
 
 def _pos(ctx, agent, who):
@@ -57,7 +83,7 @@ def _frenet_only(ctx, name):
         raise ValueError(f"feature '{name}' needs frame: frenet")
 
 
-@feature('rel_pos')
+@feature('rel_pos', mirror=_mirror('delta'))
 def rel_pos(ctx):
     if ctx.frame == 'frenet':
         return [('delta_s', ctx.ref.wrap_ds(ctx.opp['s'] - ctx.ego['s']), 'm', 's_opp - s_ego, wrapped to [-L/2, L/2)'),
@@ -66,58 +92,58 @@ def rel_pos(ctx):
             ('delta_y', ctx.opp['y'] - ctx.ego['y'], 'm', 'y_opp - y_ego, map frame')]
 
 
-@feature('rel_vel')
+@feature('rel_vel', mirror=_mirror('delta'))
 def rel_vel(ctx):
     keys = ('vs', 'vd') if ctx.frame == 'frenet' else ('vx', 'vy')
     return [(f'delta_{k}', ctx.opp[k] - ctx.ego[k], 'm/s', f'{k}_opp - {k}_ego') for k in keys]
 
 
-@feature('opp_pos')
+@feature('opp_pos', mirror=_mirror('opp'))
 def opp_pos(ctx):
     return _pos(ctx, ctx.opp, 'opp')
 
 
-@feature('opp_d')
+@feature('opp_d', mirror={'opp_d': 'odd'})
 def opp_d(ctx):
     _frenet_only(ctx, 'opp_d')
     return [('opp_d', ctx.opp['d'], 'm', 'opp lateral offset, positive left')]
 
 
-@feature('opp_vel')
+@feature('opp_vel', mirror=_mirror('opp'))
 def opp_vel(ctx):
     return _vel(ctx, ctx.opp, 'opp')
 
 
-@feature('ego_pos')
+@feature('ego_pos', mirror=_mirror('ego'))
 def ego_pos(ctx):
     return _pos(ctx, ctx.ego, 'ego')
 
 
-@feature('ego_d')
+@feature('ego_d', mirror={'ego_d': 'odd'})
 def ego_d(ctx):
     _frenet_only(ctx, 'ego_d')
     return [('ego_d', ctx.ego['d'], 'm', 'ego lateral offset, positive left')]
 
 
-@feature('ego_vel')
+@feature('ego_vel', mirror=_mirror('ego'))
 def ego_vel(ctx):
     return _vel(ctx, ctx.ego, 'ego')
 
 
-@feature('ego_cmd')
+@feature('ego_cmd', mirror={'ego_steer_cmd': 'odd', 'ego_speed_cmd': 'even'})
 def ego_cmd(ctx):
     return [('ego_steer_cmd', ctx.ego_cmd['steer'], 'rad', 'ego commanded steering angle'),
             ('ego_speed_cmd', ctx.ego_cmd['speed'], 'm/s', 'ego commanded speed')]
 
 
-@feature('curvature')
+@feature('curvature', mirror={'kappa_*': 'odd'})
 def curvature(ctx, n=10, step_m=0.5):
     """Look-ahead curvature of the reference line ahead of the opponent (Zhu et al.)."""
     return [(f'kappa_{i}', ctx.ref.interp(ctx.ref.kappa, ctx.opp['s'] + i * step_m), '1/m',
              f'reference curvature {i * step_m:g} m ahead of the opponent') for i in range(1, n + 1)]
 
 
-@feature('free_space')
+@feature('free_space', mirror={'opp_free_left': 'opp_free_right', 'opp_free_right': 'opp_free_left'})
 def free_space(ctx):
     return [('opp_free_left', ctx.ref.interp(ctx.ref.d_left, ctx.opp['s']) - ctx.opp['d'], 'm',
              'distance from the opponent to the left track bound'),
@@ -139,14 +165,14 @@ def _state(ctx):
     return [('x', gt['x'], 'm'), ('y', gt['y'], 'm'), ('vx', gt['vx'], 'm/s'), ('vy', gt['vy'], 'm/s')]
 
 
-@label('state_delta')
+@label('state_delta', mirror={f'd{c}_*': rule for c, rule in COMPONENTS})
 def state_delta(ctx, horizon=1):
     """z_{k+i} - z_k of the opponent ground truth, i = 1..horizon (s unwrapped, so no jump at the finish line)."""
     return [(f'd{name}_{i}', _shift(z, i) - z, unit, f'opp {name}(k+{i}) - {name}(k), ground truth')
             for i in range(1, horizon + 1) for name, z, unit in _state(ctx)]
 
 
-@label('state')
+@label('state', mirror={f'{c}_*': rule for c, rule in COMPONENTS})
 def state(ctx, horizon=1):
     cols = []
     for i in range(1, horizon + 1):
@@ -156,7 +182,7 @@ def state(ctx, horizon=1):
     return cols
 
 
-@label('action')
+@label('action', mirror={'steer_*': 'odd', 'speed_*': 'even'})
 def action(ctx, horizon=1, steer_limit_rad=None):
     """
     Opponent commands u_{k+i}, i = 0..horizon-1, as sent to the simulator (zero order hold).

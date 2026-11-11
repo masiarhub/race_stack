@@ -8,13 +8,14 @@ import copy
 import dataclasses
 import json
 import os
+import re
 from typing import NamedTuple
 
 import numpy as np
 import pandas as pd
 import yaml
 
-from datagen.features import FEATURES, LABELS, Context, parse_entry
+from datagen.features import FEATURES, LABELS, Context, mirror_rule, parse_entry
 from datagen.track import Track, body_to_map, unwrap_s
 
 DATASET_DEFAULTS = {
@@ -191,6 +192,26 @@ def columns_of(entries, ctx, registry, prefix):
 
 def _earlier(column: str, steps: int) -> str:
     return f'{column}_m{steps}'
+
+
+def mirrored(rows: pd.DataFrame) -> pd.DataFrame:
+    """
+    Dataset rows on the mirror image of their track (map y -> -y): lateral offsets and velocities, curvature and
+    steering change sign, the left and right track bounds swap, the rest stays. Each feature (x_) and label (y_)
+    column follows the rule its feature or label declares, meta columns stay as they are.
+    """
+    out = rows.copy()
+    for column in rows.columns:
+        role, name = column[0], column[2:]
+        if column[1:2] != '_' or role not in ('x', 'y'):
+            continue
+        base = re.sub(r'_m\d+$', '', name) if role == 'x' else name  # x_<feature>_m<j> holds it j steps earlier
+        rule = mirror_rule(role, base)
+        if rule == 'odd':
+            out[column] = -rows[column]
+        elif rule != 'even':
+            out[column] = rows[f'{role}_{rule}{name[len(base):]}']
+    return out
 
 
 def history_columns(names, history: int) -> list:

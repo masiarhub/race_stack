@@ -5,7 +5,10 @@ import numpy as np
 import pytest
 import yaml
 
-from datagen.extract import PHYSICS_DT_S, agent_state, columns_of, dataset_config, label_columns, with_slip
+import pandas as pd
+
+from datagen.extract import (PHYSICS_DT_S, agent_state, columns_of, dataset_config, label_columns, mirrored,
+                             stack_history, with_slip)
 from datagen.features import FEATURES, LABELS, Context
 from datagen.policy import AgentState, Obs, load_policy_class
 from datagen.track import Track
@@ -140,3 +143,54 @@ def test_stacked_history_holds_the_earlier_values_under_the_history_columns():
     assert np.array_equal(values['x_a_m2'], [np.nan, np.nan, 0.0, 1.0], equal_nan=True)
     assert np.array_equal(values['x_b_m1'], [np.nan, 10.0, 11.0, 12.0], equal_nan=True)
     assert np.array_equal(values['x_a'], np.arange(4.0))
+
+
+def weaving_ctx(frame):
+    """An opponent weaving across a circle with a narrow left and a wide right side, steering as it goes."""
+    tr = Track([{**w, 'd_left': 0.3, 'd_right': 0.7} for w in
+                [{'x_m': 2.0 * np.cos(a), 'y_m': 2.0 * np.sin(a), 'kappa_radpm': 0.5, 'vx_mps': 1.0}
+                 for a in np.linspace(0, 2 * np.pi, 201)]])
+    t = np.arange(0, 5, 0.05)
+    s_ego, s_opp = np.mod(t, tr.length), np.mod(t + 1.5, tr.length)
+    d_opp, vd_opp = 0.2 * np.sin(2 * t), 0.4 * np.cos(2 * t)
+    ego = agent_state(tr, *tr.to_cartesian(s_ego, -0.1), *tr.cartesian_velocity(s_ego, 1.0, 0.0))
+    opp = agent_state(tr, *tr.to_cartesian(s_opp, d_opp), *tr.cartesian_velocity(s_opp, 1.0, vd_opp))
+    return Context(frame, tr, opp, opp, ego, {'steer': 0.1 * np.sin(t), 'speed': 1.0 + 0.1 * t},
+                   {'steer': 0.2 * np.cos(t), 'speed': 1.2 + 0.1 * t})
+
+
+def mirror_image(ctx):
+    """The same episode driven on the mirror image of its track (map y -> -y), computed from scratch."""
+    tr = ctx.ref
+    track = Track([{'x_m': x, 'y_m': -y, 'kappa_radpm': -k, 'vx_mps': v, 'd_left': right, 'd_right': left}
+                   for x, y, k, v, left, right in zip(tr.x, tr.y, tr.kappa, tr.vx, tr.d_left, tr.d_right)])
+    agent = lambda a: agent_state(track, a['x'], -a['y'], a['vx'], -a['vy'])
+    cmd = lambda c: {'steer': -c['steer'], 'speed': c['speed']}
+    return Context(ctx.frame, track, agent(ctx.opp), agent(ctx.opp_gt), agent(ctx.ego), cmd(ctx.ego_cmd),
+                   cmd(ctx.opp_cmd))
+
+
+def table(ctx, features, label_type):
+    x = stack_history(columns_of(features, ctx, FEATURES, 'x'), 2)
+    y = label_columns(dataset_config({'frame': ctx.frame, 'labels': {'type': label_type, 'horizon': 2}}), ctx)
+    return pd.DataFrame({'episode': 'ep', **{name: values for name, values, _, _ in x + y}})
+
+
+@pytest.mark.parametrize('frame', ['frenet', 'cartesian'])
+@pytest.mark.parametrize('label_type', sorted(LABELS))
+def test_mirrored_rows_are_the_rows_of_the_same_episode_on_the_mirror_image_of_its_track(frame, label_type):
+    frenet_only = {'opp_d', 'ego_d', 'curvature', 'free_space'}
+    features = [f for f in FEATURES if frame == 'frenet' or f not in frenet_only]
+    ctx = weaving_ctx(frame)
+    expected = table(mirror_image(ctx), features, label_type)
+    pd.testing.assert_frame_equal(mirrored(table(ctx, features, label_type)), expected, atol=2e-3, check_exact=False)
+
+
+def test_mirroring_twice_gives_the_rows_back():
+    rows = table(weaving_ctx('frenet'), list(dataset_config(h2h_dataset())['features']), 'action')
+    pd.testing.assert_frame_equal(mirrored(mirrored(rows)), rows)
+
+
+def test_a_column_without_a_mirror_rule_can_not_be_mirrored():
+    with pytest.raises(ValueError):
+        mirrored(pd.DataFrame({'episode': ['ep'], 'x_unknown_feature': [1.0]}))
