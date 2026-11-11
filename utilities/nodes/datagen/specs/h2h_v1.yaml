@@ -36,4 +36,4 @@ dataset:                     # applied offline by `ros2 run datagen extract`, no
     - curvature: {n: 10, step_m: 0.5}
     - free_space             # distance to the left and right track bound
   labels: {type: action, horizon: 1, steer_limit_rad: 0.4509}   # state_delta | state | action, limit = sim s_max + one physics step of steering
-  history: 1
+  history: 3                 # policy input x_{k-2} .. x_k: the tracker sees no yaw or slip, the past frames stand in for them
