@@ -1,0 +1,39 @@
+# Pilot of a second track: h2h_v1 on the hand-drawn test map, one episode per opponent policy.
+name: h2h_pilot_test
+seed: 42
+episodes: 3                  # one per opponent policy
+
+tracks: [test]               # hand-drawn, 85 m long, 2.9 m wide
+
+ego:
+  policy: ego_h2h_spliner_gt  # perfect perception: the ego sees the true opponent
+
+opponents:
+  count: 1                   # the gym bridge supports one opponent
+  policies:                  # names in the policy search path, or paths to YAML files
+    - opp_tt_raceline
+    - opp_line_follower
+    - opp_blocker
+
+episode:                     # rules of one run, see datagen/spec.py for all fields and defaults
+  laps: 2
+  spawn_frac: {uniform: [0.0, 1.0]}
+  start_gap_m: {uniform: [2.0, 6.0]}
+  warmup_s: 2.0
+  timeout_s: 120.0
+  decouple: {gap_m: 15.0, duration_s: 5.0}
+
+dataset:                     # applied offline by `ros2 run datagen extract`, no re-simulation needed
+  dt: 0.05
+  frame: frenet              # frenet | cartesian
+  reference: centerline      # centerline | raceline | shortest_path
+  opp_source: gt             # x from the ego's tracker (tracker) or the sim ground truth (gt)
+  features:
+    - rel_pos                # delta_s, delta_d
+    - opp_d
+    - opp_vel                # vs, vd
+    - ego_vel
+    - curvature: {n: 10, step_m: 0.5}
+    - free_space             # distance to the left and right track bound
+  labels: {type: action, horizon: 1, steer_limit_rad: 0.4509}   # state_delta | state | action, limit = sim s_max + one physics step of steering
+  history: 3                 # policy input x_{k-2} .. x_k: the tracker sees no yaw or slip, the past frames stand in for them
