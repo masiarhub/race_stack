@@ -141,6 +141,7 @@ def run_with_model(tmp_path):
     rows = [{'episode': f'ep_{e}', 'track': 'test', 'opp_policy': 'a', 't': 2.0 + 0.05 * k, 'x_b': k, 'x_a': e,
              'y_steer_0': 0.1 * e, 'y_speed_0': 3.0} for e in range(3) for k in range(8)]
     pd.DataFrame(rows).to_csv(tmp_path / 'dataset.csv', index=False)
+    (tmp_path / 'dataset_columns.json').write_text(json.dumps({'config': {'history': 1}, 'columns': []}))
     model_dir = tmp_path / 'models' / 'm'
     model_dir.mkdir(parents=True)
     Ensemble(['x_a', 'x_b'], members=2, hidden=8, layers=1).save(model_dir / 'ensemble.pt')

@@ -6,7 +6,7 @@ import pytest
 import torch
 
 from opp_prediction.ensemble import Ensemble
-from opp_prediction.train import TrainConfig, split_episodes, train
+from opp_prediction.train import TrainConfig, split_episodes, train, trained_on
 
 SMALL = dict(members=2, hidden=16, layers=1, max_epochs=3, patience=3, seed=0)
 
@@ -114,3 +114,27 @@ def test_a_new_run_replaces_the_old_logs(noisy_line, tmp_path):
     train(noisy_line, tmp_path / 'out', TrainConfig(**SMALL))
     train(noisy_line, tmp_path / 'out', TrainConfig(**SMALL))
     assert len(list((tmp_path / 'out' / 'tensorboard' / 'member_0').glob('events.out.*'))) == 1
+
+
+def test_the_report_names_the_dataset_of_the_model(trained):
+    assert json.loads((trained / 'report.json').read_text())['dataset'] == 'dataset.csv'
+
+
+def write_run(run_dir, model_dir, name, report_extra):
+    run_dir.mkdir(exist_ok=True)
+    model_dir.mkdir(exist_ok=True)
+    pd.DataFrame({'episode': ['ep_00'], 'x_a': [1.0]}).to_csv(run_dir / name, index=False)
+    (run_dir / name.replace('.csv', '_columns.json')).write_text(json.dumps({'config': {'history': 3}, 'columns': []}))
+    (model_dir / 'report.json').write_text(json.dumps(report_extra))
+
+
+def test_a_model_reads_back_the_dataset_it_was_trained_on_and_its_config(tmp_path):
+    write_run(tmp_path / 'run', tmp_path / 'model', 'dataset_h3.csv', {'dataset': 'dataset_h3.csv'})
+    dataset, config = trained_on(tmp_path / 'run', tmp_path / 'model')
+    assert dataset['x_a'].tolist() == [1.0]
+    assert config['history'] == 3
+
+
+def test_a_model_without_a_named_dataset_was_trained_on_the_default_one(tmp_path):
+    write_run(tmp_path / 'run', tmp_path / 'model', 'dataset.csv', {})
+    assert trained_on(tmp_path / 'run', tmp_path / 'model')[1]['history'] == 3

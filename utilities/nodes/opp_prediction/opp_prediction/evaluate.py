@@ -5,16 +5,15 @@ import pathlib
 from typing import NamedTuple
 
 import numpy as np
-import pandas as pd
 import yaml
 
-from datagen.extract import dataset_config
 from datagen.rollout import RolloutModel
 from datagen.track import Track
 from opp_prediction.ensemble import Ensemble
 from opp_prediction.metrics import summarize
 from opp_prediction.predict import PREDICTION_DT_S, EgoPlan, Predictor, project
 from opp_prediction.recording import Recording, load_recording
+from opp_prediction.train import trained_on
 
 REPO = pathlib.Path(__file__).resolve().parents[4]
 HEADLINE_STEPS = (20, 30, 60)  # 1.0 s, 1.5 s, 3.0 s
@@ -66,13 +65,11 @@ def rollout_errors(rec: Recording, predictor, track, horizon: int, start_rows) -
 def evaluate(run_dir, model_dir, part: str = 'test', stride: int = 5, horizon: int = 60, rho: float = 0.0,
              seed: int = 0) -> dict:
     run_dir, model_dir = pathlib.Path(run_dir), pathlib.Path(model_dir)
-    spec = yaml.safe_load((run_dir / 'spec.yaml').read_text())
-    cfg = dataset_config(spec['dataset'])
+    dataset, cfg = trained_on(run_dir, model_dir)
     episodes = json.loads((model_dir / 'report.json').read_text())['episodes'][part]
     sim = yaml.safe_load((REPO / 'stack_master/config/SIM/sim_params.yaml').read_text())
     predictor = Predictor(Ensemble.load(model_dir / 'ensemble.pt'), RolloutModel({k: float(v) for k, v in sim.items()}),
                           cfg['features'], rho=rho, seed=seed)
-    dataset = pd.read_csv(run_dir / 'dataset.csv')
     tracks, results = {}, []
     for episode in episodes:
         rec = load_recording(run_dir / 'episodes' / episode, cfg, REPO / 'utilities/libraries/f110_msgs/msg')

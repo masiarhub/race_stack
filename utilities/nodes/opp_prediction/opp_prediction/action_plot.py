@@ -7,12 +7,11 @@ import json
 import pathlib
 
 import numpy as np
-import pandas as pd
 import torch
 from matplotlib.figure import Figure
 
 from opp_prediction.ensemble import Ensemble
-from opp_prediction.train import ACTIONS
+from opp_prediction.train import ACTIONS, trained_on
 
 PANELS = ('steer angle [rad]', 'speed command [m/s]')
 GAP_FACTOR = 1.5  # a time step this many times the typical one means dataset rows were dropped
@@ -82,7 +81,7 @@ def plot_episodes(run_dir, model_dir, part: str = 'test', episodes=None, particl
     ensemble = Ensemble.load(model_dir / 'ensemble.pt')
     if episodes is None:
         episodes = json.loads((model_dir / 'report.json').read_text())['episodes'][part]
-    dataset = pd.read_csv(run_dir / 'dataset.csv')
+    dataset, _ = trained_on(run_dir, model_dir)
     out = model_dir / 'action_plots'
     out.mkdir(exist_ok=True)
     rng, paths = np.random.default_rng(seed), []

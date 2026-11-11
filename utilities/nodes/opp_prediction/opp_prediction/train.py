@@ -15,6 +15,7 @@ from opp_prediction.training_log import TrainingLog
 
 ACTIONS = {'steer': 'y_steer_0', 'speed': 'y_speed_0'}
 COVERAGE_LEVELS = (0.5, 0.9)
+DEFAULT_DATASET = 'dataset.csv'
 
 
 @dataclasses.dataclass
@@ -91,6 +92,14 @@ def _evaluate(model: Ensemble, inputs, actions, train_mean) -> dict:
     }
 
 
+def trained_on(run_dir, model_dir) -> tuple:
+    """The dataset of the run that the model was trained on, and the dataset config that derived it."""
+    run_dir = pathlib.Path(run_dir)
+    name = json.loads((pathlib.Path(model_dir) / 'report.json').read_text()).get('dataset', DEFAULT_DATASET)
+    config = json.loads((run_dir / name).with_name(f'{pathlib.Path(name).stem}_columns.json').read_text())['config']
+    return pd.read_csv(run_dir / name), config
+
+
 def train(dataset_csv, out_dir, config: TrainConfig = TrainConfig()) -> dict:
     df = pd.read_csv(dataset_csv)
     input_columns = [c for c in df.columns if c.startswith('x_')]
@@ -112,7 +121,8 @@ def train(dataset_csv, out_dir, config: TrainConfig = TrainConfig()) -> dict:
     model.eval()
 
     train_mean = data['train'][1].mean(0)
-    report = {'config': dataclasses.asdict(config), 'episodes': split, 'rows': {k: len(v[0]) for k, v in data.items()},
+    report = {'dataset': pathlib.Path(dataset_csv).name, 'config': dataclasses.asdict(config), 'episodes': split,
+              'rows': {k: len(v[0]) for k, v in data.items()},
               **{name: _evaluate(model, *data[name], train_mean) for name in ('val', 'test')}}
     log.ensemble(report['val'], dataclasses.asdict(config))
     log.close()
