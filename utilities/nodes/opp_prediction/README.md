@@ -16,6 +16,9 @@ tensorboard --logdir <out_dir>/tensorboard                  # one run per ensemb
 
 `Predictor.predict(xi_0, ego_plan, track, past_inputs=...)` returns the particles of the opponent's trajectory. An
 ensemble trained with `history: H` needs the H - 1 feature frames observed before the prediction as `past_inputs`.
+`EgoPlan(x, y, speed, measured_speed)` drives the path of the ego's plan with its speed profile scaled to start at the
+ego's measured speed: the plan's own speeds are those of the raceline, the ego drives slower whenever its controller
+holds it back, e.g. while it trails the opponent. `evaluate` takes the measured speed from `/state_estimation/odom`.
 The action noise of a particle is correlated between steps by `rho` (default 0.8). It needs `datagen` and `f110_gym`
 on the path, for example:
 
