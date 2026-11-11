@@ -27,11 +27,16 @@ class Particles(NamedTuple):
 
 
 class EgoPlan:
-    """The ego's intended motion at prediction time: waypoints in the map frame with their speed."""
+    """
+    The ego's intended motion at prediction time: the waypoints of its plan in the map frame, driven with the plan's
+    speed profile scaled so that it starts at the ego's measured speed. The plan's own speeds overestimate the ego
+    whenever its controller holds it back, e.g. while it trails the opponent.
+    """
 
-    def __init__(self, x, y, speed):
+    def __init__(self, x, y, speed, measured_speed: float):
         self.x, self.y = np.asarray(x, dtype=float), np.asarray(y, dtype=float)
-        self.speed = np.maximum(np.asarray(speed, dtype=float), MIN_PLAN_SPEED)
+        profile = np.maximum(np.asarray(speed, dtype=float), MIN_PLAN_SPEED)
+        self.speed = np.maximum(profile * measured_speed / profile[0], MIN_PLAN_SPEED)
 
     def states(self, track, times) -> dict:
         """Ego state at each time, read from the plan and continued at constant Frenet velocity past its end."""

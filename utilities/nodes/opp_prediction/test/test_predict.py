@@ -41,7 +41,8 @@ class SpyRollout:
 
 
 XI0 = np.array([2.0, 0.0, 0.0, 1.0, np.pi / 2, 0.0, 0.0])  # on the circle, heading along it
-PLAN = EgoPlan(x=np.array([2.0, 1.99, 1.96]), y=np.array([-1.5, -1.3, -1.1]), speed=np.array([1.0, 1.0, 1.0]))
+PLAN = EgoPlan(x=np.array([2.0, 1.99, 1.96]), y=np.array([-1.5, -1.3, -1.1]), speed=np.array([1.0, 1.0, 1.0]),
+               measured_speed=1.0)
 
 
 def predictor(ensemble=None, rollout=None, **kw):
@@ -157,7 +158,7 @@ def test_an_ensemble_with_history_needs_the_observed_frames():
 def test_ego_plan_follows_the_waypoints_in_time():
     n = 21
     s = np.linspace(0.0, 2.0, n)
-    plan = EgoPlan(*TRACK.to_cartesian(s, 0.0), speed=np.full(n, 2.0))
+    plan = EgoPlan(*TRACK.to_cartesian(s, 0.0), speed=np.full(n, 2.0), measured_speed=2.0)
     ego = plan.states(TRACK, np.array([0.0, 0.5]))
     assert ego['s'] == pytest.approx([0.0, 1.0], abs=0.02)
     assert ego['d'] == pytest.approx([0.0, 0.0], abs=0.02)
@@ -167,7 +168,15 @@ def test_ego_plan_follows_the_waypoints_in_time():
 def test_ego_plan_continues_at_constant_frenet_velocity_past_its_end():
     n = 21
     s = np.linspace(0.0, 2.0, n)
-    plan = EgoPlan(*TRACK.to_cartesian(s, 0.0), speed=np.full(n, 2.0))
+    plan = EgoPlan(*TRACK.to_cartesian(s, 0.0), speed=np.full(n, 2.0), measured_speed=2.0)
     ego = plan.states(TRACK, np.array([1.0, 2.0]))  # the plan ends after 1 s
     assert ego['s'] == pytest.approx([2.0, 4.0], abs=0.1)
     assert ego['d'] == pytest.approx([0.0, 0.0], abs=0.02)
+
+
+def test_ego_plan_drives_its_speed_profile_scaled_to_the_measured_speed():
+    n = 21
+    s = np.linspace(0.0, 2.0, n)
+    plan = EgoPlan(*TRACK.to_cartesian(s, 0.0), speed=np.linspace(2.0, 4.0, n), measured_speed=1.0)
+    ego = plan.states(TRACK, np.array([0.0, 10.0]))  # the second time is past the end of the plan
+    assert ego['vs'] == pytest.approx([1.0, 2.0], abs=0.05)

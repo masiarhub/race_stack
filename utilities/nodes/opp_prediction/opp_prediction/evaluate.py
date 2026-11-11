@@ -50,7 +50,7 @@ def rollout_errors(rec: Recording, predictor, track, horizon: int, start_rows, p
         xi_0 = rec.opp_states[_at_or_before(rec.opp_t, t0)]
         plan = _at_or_before(rec.plan_t, t0)
         previous_steer = float(rec.commands[_at_or_before(rec.cmd_t, t0), 0])
-        result = predictor.predict(xi_0, EgoPlan(rec.plan_x[plan], rec.plan_y[plan], rec.plan_speed[plan]), track,
+        result = predictor.predict(xi_0, EgoPlan(rec.plan_x[plan], rec.plan_y[plan], rec.plan_speed[plan], rec.plan_speed[plan][0]), track,
                                    horizon=horizon, previous_steer=previous_steer,
                                    past_inputs=None if past_inputs is None else past_inputs[i])
         members = result.members
