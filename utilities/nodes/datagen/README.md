@@ -32,6 +32,11 @@ catalog): `frame: frenet|cartesian`, `reference: centerline|raceline|shortest_pa
 x is built from the ego's tracker estimate (`opp_source: tracker`) or from the simulator (`gt`, used by
 `h2h_v1`), y always from simulator ground truth.
 
+Every feature and label declares how its columns change on the mirror image of the track (map y -> -y):
+`@feature('opp_d', mirror={'opp_d': 'odd'})` with `even` (keeps), `odd` (changes sign) or the name of the column to
+swap with. `mirrored(rows)` in `datagen/extract.py` applies these rules to dataset rows, e.g. for training on both
+orientations of a track.
+
 ## Rules of one episode
 
 Every episode is a fresh launch of the whole stack (no state carries over).

@@ -9,10 +9,15 @@ pip install -r requirements.txt --extra-index-url https://download.pytorch.org/w
 
 python -m pytest test                                       # from this folder
 python -m opp_prediction.train <dataset.csv> <out_dir>      # writes ensemble.pt, report.json and a TensorBoard log
+python -m opp_prediction.train <dataset.csv> <out_dir> --mirror   # also trains on the mirror image of every track
 tensorboard --logdir <out_dir>/tensorboard                  # one run per ensemble member, overlaid
 ```
 
 `Ensemble.distribution(o)` returns the action mean and std in physical units, each `[members, N, 2]`.
+
+`report.json` holds the results on the held-out episodes as recorded (`test`) and on their mirror image
+(`test_mirrored`), the same track driven the other way round in the lateral sense. `--mirror` adds the mirror image
+of every train and val row, a second track orientation without new recordings.
 
 `Predictor.predict(xi_0, ego_plan, track, past_inputs=...)` returns the particles of the opponent's trajectory. An
 ensemble trained with `history: H` needs the H - 1 feature frames observed before the prediction as `past_inputs`.
