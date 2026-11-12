@@ -1,0 +1,43 @@
+# Pilot: the two f1tenth_benchmarks opponents (third party) against the h2h ego, one episode per (track, policy).
+# Records the opponent's LiDAR, so `check policies` can replay follow-the-gap. The tracks are those follow-the-gap
+# can lap (see opp_bench_ftg.yaml).
+name: bench_pilot
+seed: 44
+episodes: 4
+
+tracks: [glc_ot_ez, test]
+
+ego:
+  policy: ego_h2h_spliner_gt
+
+opponents:
+  count: 1
+  policies:
+    - opp_bench_pp
+    - opp_bench_ftg
+
+record:
+  extra_topics: [/opp_scan]
+
+episode:
+  laps: 2
+  spawn_frac: {uniform: [0.0, 1.0]}
+  start_gap_m: {uniform: [2.0, 6.0]}
+  warmup_s: 2.0
+  timeout_s: 120.0
+  decouple: {gap_m: 15.0, duration_s: 5.0}
+
+dataset:
+  dt: 0.05
+  frame: frenet
+  reference: centerline
+  opp_source: gt
+  features:
+    - rel_pos
+    - opp_d
+    - opp_vel
+    - ego_vel
+    - curvature: {n: 10, step_m: 0.5}
+    - free_space
+  labels: {type: action, horizon: 1, steer_limit_rad: 0.4509}
+  history: 3
