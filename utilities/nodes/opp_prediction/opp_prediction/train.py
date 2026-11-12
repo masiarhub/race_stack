@@ -31,6 +31,8 @@ class TrainConfig:
     seed: int = 0
     tensorboard: bool = True
     mirror: bool = False  # add every train and val row a second time, on the mirror image of its track
+    test_tracks: tuple = ()  # every episode on these tracks is held out for testing
+    train_rows: int = None  # train on whole episodes, drawn at random, of at most this many recorded rows
 
 
 def split_episodes(episode_policy: dict, seed: int, fractions=(0.7, 0.15, 0.15)) -> dict:
@@ -44,6 +46,28 @@ def split_episodes(episode_policy: dict, seed: int, fractions=(0.7, 0.15, 0.15))
         parts['test'] += eps[n_val:n_val + n_test]
         parts['train'] += eps[n_val + n_test:]
     return {name: sorted(part) for name, part in parts.items()}
+
+
+def _split(df: pd.DataFrame, config: TrainConfig) -> dict:
+    """
+    The episodes of each part: those on the test tracks are all test, the others are split by split_episodes. A row
+    budget then keeps the train episodes in a random order for as long as their rows fit into it.
+    """
+    table = df.groupby('episode').agg(policy=('opp_policy', 'first'), track=('track', 'first'),
+                                      rows=('opp_policy', 'size'))
+    unknown = sorted(set(config.test_tracks) - set(table['track']))
+    if unknown:
+        raise ValueError(f'no episodes on the test tracks {unknown}, the dataset has {sorted(set(table["track"]))}')
+    held_out = table['track'].isin(config.test_tracks)
+    split = split_episodes(table.loc[~held_out, 'policy'].to_dict(), config.seed)
+    split['test'] = sorted(split['test'] + table.index[held_out].tolist())
+    if config.train_rows is not None:
+        order = np.random.default_rng(config.seed).permutation(split['train'])
+        kept = order[np.cumsum(table.loc[order, 'rows'].to_numpy()) <= config.train_rows]
+        if not len(kept):
+            raise ValueError(f'no train episode fits into {config.train_rows} rows')
+        split['train'] = sorted(kept.tolist())
+    return split
 
 
 def _fit_member(model: Ensemble, member: int, data: dict, cfg: TrainConfig, log: TrainingLog):
@@ -105,7 +129,7 @@ def trained_on(run_dir, model_dir) -> tuple:
 def train(dataset_csv, out_dir, config: TrainConfig = TrainConfig()) -> dict:
     df = pd.read_csv(dataset_csv)
     input_columns = [c for c in df.columns if c.startswith('x_')]
-    split = split_episodes(df.groupby('episode')['opp_policy'].first().to_dict(), config.seed)
+    split = _split(df, config)
     parts = {name: df[df['episode'].isin(episodes)] for name, episodes in split.items()}
     parts['test_mirrored'] = mirrored(parts['test'])  # before training: a column without a mirror rule fails here
     if config.mirror:
@@ -144,9 +168,14 @@ def main():
     parser.add_argument('--no-tensorboard', action='store_true', help='do not write the TensorBoard log')
     parser.add_argument('--mirror', action='store_true',
                         help='add every train and val row a second time, on the mirror image of its track')
+    parser.add_argument('--test-tracks', nargs='+', default=[], metavar='TRACK',
+                        help='hold out every episode on these tracks for testing')
+    parser.add_argument('--train-rows', type=int, metavar='N',
+                        help='train on whole episodes, drawn at random, of at most N recorded rows')
     args = parser.parse_args()
     report = train(args.dataset_csv, args.out_dir,
-                   TrainConfig(seed=args.seed, tensorboard=not args.no_tensorboard, mirror=args.mirror))
+                   TrainConfig(seed=args.seed, tensorboard=not args.no_tensorboard, mirror=args.mirror,
+                               test_tracks=tuple(args.test_tracks), train_rows=args.train_rows))
     print(json.dumps({k: report[k] for k in ('rows', 'val', 'test', 'test_mirrored')}, indent=2))
 
 

@@ -41,7 +41,7 @@ def noisy_line(tmp_path):
     n = 6000
     a, b = rng.uniform(-1, 1, n), rng.uniform(-1, 1, n)
     df = pd.DataFrame({
-        'episode': [f'ep_{i % 30:02d}' for i in range(n)], 'opp_policy': ['p'] * n,
+        'episode': [f'ep_{i % 30:02d}' for i in range(n)], 'track': ['t'] * n, 'opp_policy': ['p'] * n,
         'x_opp_d': a, 'x_opp_vs': b,
         'y_steer_0': a, 'y_speed_0': 2.0 + rng.normal(0, np.where(b < 0, 0.05, 0.4))})
     path = tmp_path / 'dataset.csv'
@@ -152,3 +152,57 @@ def test_a_model_reads_back_the_dataset_it_was_trained_on_and_its_config(tmp_pat
 def test_a_model_without_a_named_dataset_was_trained_on_the_default_one(tmp_path):
     write_run(tmp_path / 'run', tmp_path / 'model', 'dataset.csv', {})
     assert trained_on(tmp_path / 'run', tmp_path / 'model')[1]['history'] == 3
+
+
+@pytest.fixture
+def three_tracks(tmp_path):
+    """Episodes of 40 to 150 rows on the tracks a, b and c, each driven by the policies p and q."""
+    rng = np.random.default_rng(1)
+    frames = []
+    for i in range(36):
+        n = 40 + 10 * (i % 12)
+        a = rng.uniform(-1, 1, n)
+        frames.append(pd.DataFrame({'episode': f'ep_{i:02d}', 'track': 'abc'[i % 3], 'opp_policy': 'pq'[i // 3 % 2],
+                                    'x_opp_d': a, 'x_opp_vs': rng.uniform(-1, 1, n),
+                                    'y_steer_0': a, 'y_speed_0': 2.0 + rng.normal(0, 0.1, n)}))
+    path = tmp_path / 'dataset.csv'
+    pd.concat(frames).to_csv(path, index=False)
+    return path
+
+
+def on_track(dataset_csv, track) -> set:
+    df = pd.read_csv(dataset_csv)
+    return set(df.loc[df['track'] == track, 'episode'])
+
+
+def test_every_episode_on_a_test_track_is_held_out_for_testing(three_tracks, tmp_path):
+    report = train(three_tracks, tmp_path / 'out', TrainConfig(**SMALL, tensorboard=False, test_tracks=('c',)))
+    split = {part: set(episodes) for part, episodes in report['episodes'].items()}
+    assert on_track(three_tracks, 'c') <= split['test']
+    assert not on_track(three_tracks, 'c') & (split['train'] | split['val'])
+    assert split['test'] - on_track(three_tracks, 'c')  # the other tracks still have test episodes of their own
+
+
+def test_a_test_track_without_episodes_fails_before_training(three_tracks, tmp_path):
+    with pytest.raises(ValueError, match='hangar'):
+        train(three_tracks, tmp_path / 'out', TrainConfig(**SMALL, tensorboard=False, test_tracks=('c', 'hangar')))
+    assert not (tmp_path / 'out').exists()
+
+
+def test_a_row_budget_trains_on_whole_episodes_of_at_most_that_many_rows(three_tracks, tmp_path):
+    plain = train(three_tracks, tmp_path / 'plain', TrainConfig(**SMALL, tensorboard=False))
+    budget = train(three_tracks, tmp_path / 'budget', TrainConfig(**SMALL, tensorboard=False, train_rows=1000))
+    rows = pd.read_csv(three_tracks).groupby('episode').size()
+    assert 1000 - rows.max() < budget['rows']['train'] <= 1000
+    assert budget['rows']['train'] == rows[budget['episodes']['train']].sum()
+    assert set(budget['episodes']['train']) < set(plain['episodes']['train'])
+    assert {part: budget['episodes'][part] for part in ('val', 'test')} == \
+           {part: plain['episodes'][part] for part in ('val', 'test')}
+
+
+def test_the_row_budget_counts_the_recorded_rows_and_mirroring_doubles_them(three_tracks, tmp_path):
+    budget = train(three_tracks, tmp_path / 'budget', TrainConfig(**SMALL, tensorboard=False, train_rows=1000))
+    mirror = train(three_tracks, tmp_path / 'mirror', TrainConfig(**SMALL, tensorboard=False, train_rows=1000,
+                                                                  mirror=True))
+    assert mirror['episodes'] == budget['episodes']
+    assert mirror['rows']['train'] == 2 * budget['rows']['train']

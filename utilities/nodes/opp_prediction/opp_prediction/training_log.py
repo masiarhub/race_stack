@@ -65,7 +65,8 @@ class TrainingLog:
             writer.add_scalar(f'aleatoric_std/{name}', results['aleatoric_std'][name], 0)
             writer.add_scalar(f'epistemic_std/{name}', results['epistemic_std'][name], 0)
             writer.add_scalar(f'coverage_90/{name}', results['coverage'][str(COVERAGE_LEVEL)][name], 0)
-        writer.add_hparams(config, {'hparam/val_nll': results['nll']}, run_name='.')
+        hparams = {k: v if isinstance(v, (bool, int, float, str)) else str(v) for k, v in config.items()}
+        writer.add_hparams(hparams, {'hparam/val_nll': results['nll']}, run_name='.')
 
     def close(self):
         for writer in self.writers.values():
