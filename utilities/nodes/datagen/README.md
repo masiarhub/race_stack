@@ -80,7 +80,16 @@ It is resolved (sampled) once per episode and frozen; its hash is stored per epi
   `params` are keyed by fully qualified node name (parameters a node loads from its own param file can not be overridden).
 - `kind: python` a class implementing `datagen.policy.Policy.act(obs) -> (steer, speed)`, given as
   `entrypoint: file.py:Class` ([line_follower.py](policies/line_follower.py), [blocker.py](policies/blocker.py)).
-  Run by `policy_runner` with read-only parameters.
+  Run by `policy_runner` with read-only parameters. A policy with `needs_scan = True` also gets its own LiDAR in
+  `obs.scan` (from `/opp_scan`), and the runner waits for it before driving.
+
+Third-party policies: [benchmark.py](policies/benchmark.py) runs the planners of
+[f1tenth_benchmarks](https://github.com/BDEvan5/f1tenth_benchmarks) (Evans et al. 2024, Apache-2.0) unchanged from
+the pinned submodule `utilities/third_party/f1tenth_benchmarks` (`git submodule update --init` after cloning).
+[opp_bench_pp.yaml](policies/opp_bench_pp.yaml) is its pure pursuit on a datagen line (blind to the ego) and
+[opp_bench_ftg.yaml](policies/opp_bench_ftg.yaml) its follow-the-gap, which steers from the LiDAR only and so
+reacts to the ego in its scan. `overrides` replace values of upstream's `params/<Planner>.yaml`. Follow-the-gap
+laps only glc_ot_ez and test; both policy files say why and how their ranges were checked.
 
 Contract: opponent nodes live in `/opp_racecar` and publish `/opp_drive`; the ego publishes `/drive`.
 
@@ -107,7 +116,7 @@ off (`perception: 'False'`); [ego_h2h_spliner.yaml](policies/ego_h2h_spliner.yam
 | test | question | method |
 |---|---|---|
 | `perception` | Is the pipeline or the ego's perception the problem? | detector and tracker vs ground truth per grid step; dataset built twice (x from tracker / from ground truth) |
-| `policies` | Do the values match the opponent policies? | python policies replayed from the recorded state; motion vs sampled parameters |
+| `policies` | Do the values match the opponent policies? | python policies replayed from the recorded state (scan policies only if the spec records `/opp_scan`); motion vs sampled parameters |
 | `labels` | Do the labels match the raw recording? | state labels vs recorded velocities (also time-shifted, and on a wall-clock grid for comparison); action labels replayed through the gym model |
 
 [specs/known_answer.yaml](specs/known_answer.yaml) records opponents with fixed, known parameters for `policies`.

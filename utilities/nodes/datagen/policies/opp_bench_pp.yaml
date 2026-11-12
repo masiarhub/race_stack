@@ -1,0 +1,16 @@
+# Opponent: pure pursuit of f1tenth_benchmarks (third party, see benchmark.py) on the raceline, blind to the ego.
+# Only the raceline: the shortest path and the centerline have corners tighter than upstream's 0.4 rad steering
+# limit allows (curvature > tan(0.4)/0.33 = 1.28 1/m) on every map but test. Ranges checked offline (plain gym,
+# 4 starts x 2 laps on glc_ot_ez, GLC_smile_small, hangar_1905_v0, test): longer lookaheads cut corners into the
+# wall on GLC_smile_small, shorter ones crash out of some starts on hangar_1905_v0.
+name: opp_bench_pp
+kind: python
+entrypoint: benchmark.py:BenchmarkPlanner
+rate_hz: 25               # upstream's simulator runs its planners every 4 physics steps of 10 ms
+params:
+  planner: pure_pursuit
+  line: raceline
+  speed_scale: {uniform: [0.25, 0.4]}  # fraction of the line's speed profile (the ego runs at 0.5)
+  overrides:                           # upstream params/GlobalPurePursuit.yaml
+    tal_constant_lookahead: {uniform: [0.7, 0.85]}  # [m]
+    tal_variable_lookahead: {uniform: [0.3, 0.6]}   # [m] added at upstream's max speed of 8 m/s

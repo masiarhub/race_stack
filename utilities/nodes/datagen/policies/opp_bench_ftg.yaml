@@ -1,0 +1,15 @@
+# Opponent: follow-the-gap of f1tenth_benchmarks (third party, see benchmark.py). Steers from its own LiDAR only,
+# so it reacts to the ego whenever the ego is in its scan.
+# Upstream's tuning (range cap 10 m) aims at the farthest point and cuts every corner of our 1.2-1.6 m wide tracks,
+# at any speed. With the range capped at 2-2.5 m and a wider smoothing window it laps glc_ot_ez and test (offline
+# check, plain gym, 4 starts x 2 laps); on GLC_smile_small and hangar_1905_v0 no setting tried gets round.
+name: opp_bench_ftg
+kind: python
+entrypoint: benchmark.py:BenchmarkPlanner
+rate_hz: 25               # upstream's simulator runs its planners every 4 physics steps of 10 ms
+params:
+  planner: follow_the_gap
+  speed_scale: {uniform: [0.3, 0.45]}  # of upstream's 3 m/s (corners) and 5 m/s (straights)
+  overrides:                           # upstream params/FollowTheGap.yaml
+    max_lidar_dist: {uniform: [2.0, 2.5]}         # [m] ranges are clipped to this before the gap search
+    best_point_conv_size: {int_uniform: [200, 250]}  # [beams] smoothing window for the target point
