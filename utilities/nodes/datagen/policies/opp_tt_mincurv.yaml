@@ -1,0 +1,14 @@
+# Opponent: the race stack time trials stack on the minimum curvature raceline, blind to the ego, at a reduced,
+# sampled speed. Like opp_tt_raceline without shortest_path, which is tighter than the 0.4 rad steering limit allows
+# on the narrow maps (h2h_v2: 0 of 35 shortest_path episodes finished there, 38 of 38 mincurv ones did).
+name: opp_tt_mincurv
+kind: launch
+launch: {package: stack_master, file: time_trials_launch.xml}
+args:
+  sim_opp: true
+  racecar_version: SIM
+  ctrl_algo: MAP
+  raceline: mincurv
+params:
+  /opp_racecar/sector_tuner:
+    global_limit: {uniform: [0.25, 0.4], step: 0.01}  # fraction of the raceline speed profile (the ego runs at 0.5)
