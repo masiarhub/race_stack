@@ -18,3 +18,6 @@
 	path = sensors/vesc
 	url = https://github.com/ForzaETH/vesc.git
 	branch = foxy
+[submodule "utilities/third_party/f1tenth_benchmarks"]
+	path = utilities/third_party/f1tenth_benchmarks
+	url = https://github.com/BDEvan5/f1tenth_benchmarks.git
