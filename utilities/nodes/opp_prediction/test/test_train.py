@@ -156,7 +156,8 @@ def test_a_model_without_a_named_dataset_was_trained_on_the_default_one(tmp_path
 
 @pytest.fixture
 def three_tracks(tmp_path):
-    """Episodes of 40 to 150 rows on the tracks a, b and c, each driven by the policies p and q."""
+    """Episodes of 40 to 150 rows on the tracks a, b and c, each driven by the policies p and q. The opponent drives
+    at 2 m/s on a and b, at 4 m/s on c."""
     rng = np.random.default_rng(1)
     frames = []
     for i in range(36):
@@ -164,7 +165,7 @@ def three_tracks(tmp_path):
         a = rng.uniform(-1, 1, n)
         frames.append(pd.DataFrame({'episode': f'ep_{i:02d}', 'track': 'abc'[i % 3], 'opp_policy': 'pq'[i // 3 % 2],
                                     'x_opp_d': a, 'x_opp_vs': rng.uniform(-1, 1, n),
-                                    'y_steer_0': a, 'y_speed_0': 2.0 + rng.normal(0, 0.1, n)}))
+                                    'y_steer_0': a, 'y_speed_0': (4.0 if i % 3 == 2 else 2.0) + rng.normal(0, 0.1, n)}))
     path = tmp_path / 'dataset.csv'
     pd.concat(frames).to_csv(path, index=False)
     return path
@@ -206,3 +207,15 @@ def test_the_row_budget_counts_the_recorded_rows_and_mirroring_doubles_them(thre
                                                                   mirror=True))
     assert mirror['episodes'] == budget['episodes']
     assert mirror['rows']['train'] == 2 * budget['rows']['train']
+
+
+def test_the_report_holds_the_test_results_of_every_track(three_tracks, tmp_path):
+    report = train(three_tracks, tmp_path / 'out', TrainConfig(**SMALL, tensorboard=False, test_tracks=('c',)))
+    by_track = report['test_by_track']
+    assert set(by_track) == {'a', 'b', 'c'}
+    assert by_track['c']['rmse']['speed'] > 1.5 > 0.5 > by_track['a']['rmse']['speed']  # c is faster than seen
+
+
+def test_on_a_single_track_its_test_results_are_those_of_the_whole_test_part(trained):
+    report = json.loads((trained / 'report.json').read_text())
+    assert report['test_by_track'] == {'t': report['test']}

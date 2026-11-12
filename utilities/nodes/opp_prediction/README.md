@@ -21,7 +21,7 @@ tensorboard --logdir <out_dir>/tensorboard                  # one run per ensemb
 of every train and val row, a second track orientation without new recordings.
 
 `--test-tracks` holds out every episode on these tracks for testing, the episodes of the other tracks are split as
-usual, so `test` holds both. `--train-rows N` trains on whole episodes, drawn at random, of at most N recorded rows,
+usual, so `test` holds both, and `test_by_track` holds its results per track. `--train-rows N` trains on whole episodes, drawn at random, of at most N recorded rows,
 val and test stay as they are. It counts the recorded rows: `--mirror` adds their mirror image on top.
 
 `Predictor.predict(xi_0, ego_plan, track, past_inputs=...)` returns the particles of the opponent's trajectory. An

@@ -135,9 +135,12 @@ def train(dataset_csv, out_dir, config: TrainConfig = TrainConfig()) -> dict:
     if config.mirror:
         for name in ('train', 'val'):
             parts[name] = pd.concat([parts[name], mirrored(parts[name])], ignore_index=True)
-    data = {name: (torch.tensor(part[input_columns].to_numpy(), dtype=torch.float32),
-                   torch.tensor(part[list(ACTIONS.values())].to_numpy(), dtype=torch.float32))
-            for name, part in parts.items()}
+
+    def tensors(part):
+        return (torch.tensor(part[input_columns].to_numpy(), dtype=torch.float32),
+                torch.tensor(part[list(ACTIONS.values())].to_numpy(), dtype=torch.float32))
+
+    data = {name: tensors(part) for name, part in parts.items()}
 
     torch.manual_seed(config.seed)
     model = Ensemble(input_columns, config.members, config.hidden, config.layers)
@@ -152,7 +155,9 @@ def train(dataset_csv, out_dir, config: TrainConfig = TrainConfig()) -> dict:
     train_mean = data['train'][1].mean(0)
     report = {'dataset': pathlib.Path(dataset_csv).name, 'config': dataclasses.asdict(config), 'episodes': split,
               'rows': {k: len(v[0]) for k, v in data.items()},
-              **{name: _evaluate(model, *data[name], train_mean) for name in ('val', 'test', 'test_mirrored')}}
+              **{name: _evaluate(model, *data[name], train_mean) for name in ('val', 'test', 'test_mirrored')},
+              'test_by_track': {track: _evaluate(model, *tensors(rows), train_mean)
+                                for track, rows in parts['test'].groupby('track')}}
     log.ensemble(report['val'], dataclasses.asdict(config))
     log.close()
     model.save(out / 'ensemble.pt')
@@ -176,7 +181,7 @@ def main():
     report = train(args.dataset_csv, args.out_dir,
                    TrainConfig(seed=args.seed, tensorboard=not args.no_tensorboard, mirror=args.mirror,
                                test_tracks=tuple(args.test_tracks), train_rows=args.train_rows))
-    print(json.dumps({k: report[k] for k in ('rows', 'val', 'test', 'test_mirrored')}, indent=2))
+    print(json.dumps({k: report[k] for k in ('rows', 'val', 'test', 'test_mirrored', 'test_by_track')}, indent=2))
 
 
 if __name__ == '__main__':
