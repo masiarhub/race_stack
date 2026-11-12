@@ -26,7 +26,7 @@ import importlib
 import importlib.util
 import json
 import os
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
 import numpy as np
 import yaml
@@ -148,6 +148,7 @@ class Obs:
     t: float          # [s] since the policy received its first observation
     opp: AgentState   # the car this policy drives
     ego: AgentState   # the other car (simulator ground truth)
+    scan: Optional[np.ndarray] = None  # [m] LiDAR ranges of the car this policy drives, only for needs_scan policies
 
 
 class Policy:
@@ -156,7 +157,9 @@ class Policy:
 
     tracks: {'centerline', 'raceline', 'shortest_path'} -> datagen.track.Track of the current map
     rng:    seeded per episode, use it for any randomness so episodes stay reproducible
+    needs_scan: True if act() reads obs.scan, so the runner waits for the LiDAR before driving
     """
+    needs_scan = False
 
     def __init__(self, params: dict, tracks: Dict[str, 'Track'], rng: np.random.Generator):
         self.params = params

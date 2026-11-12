@@ -182,7 +182,7 @@ def _latest(msgs, times, t):
 
 
 def replay_python_policy(ep: dict, bag: dict, tracks: dict) -> dict:
-    """Recomputes every /opp_drive command from the latest odometry the policy could have had at that moment."""
+    """Recomputes every /opp_drive command from the latest odometry (and scan) the policy could have had then."""
     pol = ep['opp_policy']
     path = pol['entrypoint'].rsplit(':', 1)[0]
     same_code = _sha256(path) == pol['source_sha256'].get(os.path.basename(path))
@@ -190,15 +190,22 @@ def replay_python_policy(ep: dict, bag: dict, tracks: dict) -> dict:
     # the policy reads the ego from /opp_racecar/opp_odom, older runs only have /state_estimation/odom
     own, other = bag['/opp_racecar/odom'], bag['/opp_racecar/opp_odom'] or bag['/state_estimation/odom']
     t_own, t_other = np.array([m[0] for m in own]), np.array([m[0] for m in other])
+    scans = bag.get('/opp_scan') or []
+    if policy.needs_scan and not scans:
+        return {'same_code': same_code, 'commands': 0, 'identical': None, 'steer_err_p95_rad': None,
+                'speed_err_p95_mps': None, 'skipped': 'needs /opp_scan, add it to record.extra_topics'}
+    t_scan = np.array([m[0] for m in scans])
     cl = tracks['centerline']
     t_first, err = None, []
     for _, drive in bag['/opp_drive']:
         t = _stamp_ns(drive)
         o, e = _latest(own, t_own, t), _latest(other, t_other, t)
-        if o is None or e is None:
+        scan = _latest(scans, t_scan, t) if policy.needs_scan else None
+        if o is None or e is None or (policy.needs_scan and scan is None):
             continue
         t_first = t if t_first is None else t_first
-        steer, speed = policy.act(Obs(t=(t - t_first) * 1e-9, opp=state_from_odom(o, cl), ego=state_from_odom(e, cl)))
+        steer, speed = policy.act(Obs(t=(t - t_first) * 1e-9, opp=state_from_odom(o, cl), ego=state_from_odom(e, cl),
+                                      scan=None if scan is None else np.asarray(scan.ranges, dtype=float)))
         err.append((steer - drive.drive.steering_angle, speed - drive.drive.speed))
     err = np.abs(np.array(err)) if err else np.zeros((0, 2))
     return {'same_code': same_code, 'commands': len(err),
@@ -215,7 +222,7 @@ def _median(a):
 
 def policies_episode(ep_dir: str, cfg: dict) -> dict:
     episode = load_episode(ep_dir, cfg, ['/opp_racecar/odom', '/opp_racecar/opp_odom', '/state_estimation/odom',
-                                         '/opp_drive'])
+                                         '/opp_drive', '/opp_scan'])
     ep, bag, grid = episode.plan, episode.bag, episode.grid.wall_ns
     pol = ep['opp_policy']
     out = {'opp_policy': pol['name'], 'kind': pol['kind']}
@@ -253,7 +260,7 @@ def policies_episode(ep_dir: str, cfg: dict) -> dict:
     out['speed_cmd_over_target'] = _median(df['cmd'] / df['v_target'])
     if 'x_opp_vs' in df:
         out['x_opp_vs_over_speed'] = _median(df['x_opp_vs'] / df['speed'])
-    if pol['kind'] == 'python' and 'x_opp_d' in df and cfg['reference'] == pol['params']['line']:
+    if 'd_offset_m' in pol['params'] and 'x_opp_d' in df and cfg['reference'] == pol['params'].get('line'):
         out['x_opp_d_minus_offset_m'] = _median(df['x_opp_d'] - pol['params']['d_offset_m'])
     if pol['kind'] != 'python':
         out['abs_d_to_own_line_m'] = _median(np.abs(df['d_line']))
@@ -287,7 +294,8 @@ def print_policies(report: dict):
         r = e.get('replay')
         if r:
             print(f"  {name:8s} {e['opp_policy']:18s} {str(r['same_code']):>9s} {r['commands']:8d} "
-                  f"{fmt(r['identical'], '{:8.0%}'):>9s} {fmt(r['steer_err_p95_rad'], '{:9.4f}')} {fmt(r['speed_err_p95_mps'], '{:9.4f}')}")
+                  f"{fmt(r['identical'], '{:8.0%}'):>9s} {fmt(r['steer_err_p95_rad'], '{:9.4f}')} {fmt(r['speed_err_p95_mps'], '{:9.4f}')}"
+                  + (f"  skipped: {r['skipped']}" if 'skipped' in r else ''))
     print("\nMotion vs parameters (medians over the dataset rows, x from the ground truth):")
     print(f"  {'ep':8s} {'policy':18s} {'rows':>4s} {'v/target':>8s} {'cmd/target':>10s} {'x_vs/v':>6s} "
           f"{'d-offset':>8s} {'|d| line':>8s} {'|dd| block/free':>15s}")

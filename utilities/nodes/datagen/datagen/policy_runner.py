@@ -1,8 +1,8 @@
 """
 Drives the simulated opponent with a python policy (see datagen.policy.Policy).
 
-Runs in the /opp_racecar namespace: reads its own odometry and the ego odometry as seen by the opponent,
-publishes /opp_drive. All parameters are read-only, so the policy is frozen for the whole episode.
+Runs in the /opp_racecar namespace: reads its own odometry and the ego odometry as seen by the opponent
+(and its own LiDAR /opp_scan if the policy needs_scan), publishes /opp_drive. All parameters are read-only, so the policy is frozen for the whole episode.
 """
 import json
 import os
@@ -13,6 +13,7 @@ from rclpy.node import Node
 from rcl_interfaces.msg import ParameterDescriptor
 from ackermann_msgs.msg import AckermannDriveStamped
 from nav_msgs.msg import Odometry
+from sensor_msgs.msg import LaserScan
 
 from datagen.policy import AgentState, Obs, load_policy_class, state_from_odom
 from datagen.track import LINE_KEYS, Track
@@ -33,9 +34,12 @@ class PolicyRunner(Node):
 
         self.own = None
         self.other = None
+        self.scan = None
         self.t_first = None
         self.create_subscription(Odometry, 'odom', lambda m: setattr(self, 'own', m), 10)
         self.create_subscription(Odometry, 'opp_odom', lambda m: setattr(self, 'other', m), 10)
+        if self.policy.needs_scan:  # the gym bridge publishes the opponent's scan outside its namespace
+            self.create_subscription(LaserScan, '/opp_scan', lambda m: setattr(self, 'scan', m), 10)
         self.drive_pub = self.create_publisher(AckermannDriveStamped, '/opp_drive', 10)
         self.create_timer(1.0 / self.get_parameter('rate_hz').value, self.step)
         self.get_logger().info(f"Policy {entrypoint} loaded")
@@ -44,11 +48,12 @@ class PolicyRunner(Node):
         return state_from_odom(msg, self.tracks['centerline'])
 
     def step(self):
-        if self.own is None or self.other is None:
+        if self.own is None or self.other is None or (self.policy.needs_scan and self.scan is None):
             return
         now = self.get_clock().now()
         self.t_first = self.t_first or now.nanoseconds
-        obs = Obs(t=(now.nanoseconds - self.t_first) * 1e-9, opp=self.state(self.own), ego=self.state(self.other))
+        obs = Obs(t=(now.nanoseconds - self.t_first) * 1e-9, opp=self.state(self.own), ego=self.state(self.other),
+                  scan=None if self.scan is None else np.asarray(self.scan.ranges, dtype=float))
         steer, speed = self.policy.act(obs)
         msg = AckermannDriveStamped()
         msg.header.stamp = now.to_msg()
