@@ -23,6 +23,8 @@ Output: `<out>/<spec name>/<timestamp>/` with `spec.yaml`, `manifest.json` (git 
 ## Spec
 
 See [specs/h2h_v1.yaml](specs/h2h_v1.yaml). Episodes are assigned round robin over `tracks x opponents.policies`.
+An opponent given as `{policy: name, tracks: [...]}` only runs on the tracks listed (e.g. a policy that can not lap
+the others), and the round robin skips its other pairs.
 Any value in `episode` or a policy file can be a distribution: `{uniform: [lo, hi], step: 0.01}`,
 `{int_uniform: [lo, hi]}`, `{choice: [...]}`. Draws come from `(seed, episode index)` only.
 

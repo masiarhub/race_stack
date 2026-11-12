@@ -1,6 +1,7 @@
 import os
 
 import pytest
+import yaml
 
 HERE = os.path.dirname(__file__)
 MAPS = os.path.realpath(os.path.join(HERE, '..', '..', '..', '..', 'stack_master', 'maps'))
@@ -48,3 +49,25 @@ def test_records_what_the_rollout_needs():
     for topic in ('/sim/state/ego', '/sim/state/opp', '/rollout_state', '/opp_racecar/rollout_state',
                   '/local_waypoints'):
         assert topic in RECORD_TOPICS
+
+
+def _spec(tmp_path, monkeypatch, policies):
+    monkeypatch.setenv('DATAGEN_POLICY_PATH', os.path.join(HERE, '..', 'policies'))
+    path = tmp_path / 'spec.yaml'
+    path.write_text(yaml.safe_dump({'tracks': ['glc_ot_ez', 'test'], 'episodes': 6, 'ego': {'policy': 'ego_h2h_spliner'},
+                                    'opponents': {'count': 1, 'policies': policies}}))
+    return str(path)
+
+
+def test_an_opponent_can_be_limited_to_some_tracks(tmp_path, monkeypatch):
+    spec = load_spec(_spec(tmp_path, monkeypatch, ['opp_line_follower', {'policy': 'opp_blocker', 'tracks': ['test']}]))
+    pairs = [(p['track'], p['opp_policy']['name']) for p in (plan_episode(spec, i) for i in range(4))]
+    assert pairs == [('glc_ot_ez', 'opp_line_follower'), ('test', 'opp_line_follower'), ('test', 'opp_blocker'),
+                     ('glc_ot_ez', 'opp_line_follower')]  # round robin over the allowed pairs only
+
+
+def test_opponent_tracks_must_be_spec_tracks(tmp_path, monkeypatch):
+    with pytest.raises(ValueError, match='hangar_1905_v0'):
+        load_spec(_spec(tmp_path, monkeypatch, [{'policy': 'opp_blocker', 'tracks': ['hangar_1905_v0']}]))
+    with pytest.raises(ValueError, match='policy'):
+        load_spec(_spec(tmp_path, monkeypatch, [{'tracks': ['test']}]))

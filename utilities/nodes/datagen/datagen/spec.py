@@ -2,7 +2,6 @@
 Experiment spec: loading, validation and the deterministic per-episode plan.
 """
 import copy
-import itertools
 import os
 
 import yaml
@@ -79,6 +78,23 @@ def load_spec(path: str) -> dict:
     return spec
 
 
+def opponent_entries(spec: dict) -> list:
+    """The opponent policies as (policy ref, tracks): a plain name runs on every track of the spec,
+    {policy: name, tracks: [...]} only on the tracks listed."""
+    out = []
+    for entry in (spec.get('opponents') or {}).get('policies') or []:
+        if isinstance(entry, dict):
+            out.append((entry.get('policy'), list(entry.get('tracks') or spec.get('tracks') or [])))
+        else:
+            out.append((entry, list(spec.get('tracks') or [])))
+    return out
+
+
+def episode_pairs(spec: dict) -> list:
+    """The (track, opponent policy) pairs episodes are assigned to round robin, tracks first."""
+    return [(track, ref) for track in spec['tracks'] for ref, tracks in opponent_entries(spec) if track in tracks]
+
+
 def validate(spec: dict):
     errors = []
     if not spec.get('tracks'):
@@ -93,13 +109,20 @@ def validate(spec: dict):
         errors.append(f"opponents.count: the gym bridge supports exactly {MAX_OPPONENTS} opponent for now")
     if not opp.get('policies'):
         errors.append("opponents.policies: list at least one policy")
+    for entry in opp.get('policies') or []:
+        if isinstance(entry, dict):
+            if not entry.get('policy') or set(entry) - {'policy', 'tracks'}:
+                errors.append(f"opponents.policies: {entry} must be a name or {{policy: name, tracks: [...]}}")
+            unknown = sorted(set(entry.get('tracks') or []) - set(spec.get('tracks') or []))
+            if unknown:
+                errors.append(f"opponent {entry.get('policy')}: tracks {unknown} are not in the spec's tracks")
     if not (spec.get('ego') or {}).get('policy'):
         errors.append("ego.policy: missing")
     if int(spec['episodes']) < 1:
         errors.append("episodes: must be >= 1")
     # resolve every policy once, so a broken definition fails before any simulation
     spec_dir = os.path.dirname(spec['_path'])
-    for role, ref in [('ego', spec.get('ego', {}).get('policy'))] + [('opp', r) for r in opp.get('policies') or []]:
+    for role, ref in [('ego', spec.get('ego', {}).get('policy'))] + [('opp', r) for r, _ in opponent_entries(spec)]:
         if ref:
             try:
                 pdef = load_policy_def(find_policy_file(ref, spec_dir))
@@ -116,8 +139,8 @@ def validate(spec: dict):
 def plan_episode(spec: dict, idx: int) -> dict:
     """Everything one episode needs, derived only from the spec and (seed, idx)."""
     spec_dir = os.path.dirname(spec['_path'])
-    combos = list(itertools.product(spec['tracks'], spec['opponents']['policies']))
-    track, opp_ref = combos[idx % len(combos)]
+    pairs = episode_pairs(spec)
+    track, opp_ref = pairs[idx % len(pairs)]
     seed = int(spec['seed'])
 
     rules = sample(spec['episode'], episode_rng(seed, idx, 'episode'))
