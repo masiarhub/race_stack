@@ -1,9 +1,10 @@
-# First dataset driven only by official policies, none written for this project: the race stack's time trials
-# stack (first party) and the pure pursuit and follow-the-gap of f1tenth_benchmarks (third party) as opponents,
-# the race stack's head-to-head stack as the ego. Tracks and density as h2h_v2.
+# First dataset driven only by official policies, none written for this project: the race stack's head-to-head and
+# time trials stacks (first party) and the pure pursuit and follow-the-gap of f1tenth_benchmarks (third party) as
+# opponents, the race stack's head-to-head stack as the ego. The opponent starts ahead of or behind the ego.
+# Tracks and density per pair as h2h_v2.
 name: h2h_v3
 seed: 46                     # not used by earlier specs
-episodes: 200                # round robin over the 10 (track, opponent policy) pairs: 20 per pair
+episodes: 280                # round robin over the 14 (track, opponent policy) pairs: 20 per pair
 
 tracks: [glc_ot_ez, GLC_smile_small, hangar_1905_v0, test]
 
@@ -13,6 +14,7 @@ ego:
 opponents:
   count: 1                   # the gym bridge supports one opponent
   policies:
+    - opp_h2h_spliner        # first party, sees the ego (perfect perception), trails and overtakes it
     - opp_tt_mincurv         # first party, blind to the ego
     - opp_bench_pp           # third party, blind to the ego
     - {policy: opp_bench_ftg, tracks: [glc_ot_ez, test]}  # third party, reacts to the ego; laps only these tracks
@@ -24,6 +26,7 @@ episode:                     # rules of one run, see datagen/spec.py for all fie
   laps: 2
   spawn_frac: {uniform: [0.0, 1.0]}
   start_gap_m: {uniform: [2.0, 6.0]}
+  opp_start: {choice: [ahead, behind]}
   warmup_s: 2.0
   timeout_s: 120.0
   decouple: {gap_m: 15.0, duration_s: 5.0}

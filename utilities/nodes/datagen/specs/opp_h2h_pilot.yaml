@@ -1,0 +1,23 @@
+# Pilot: the race stack head-to-head stack as the opponent (both cars see each other perfectly), starting ahead of
+# and behind the ego, on a short and a long track.
+name: opp_h2h_pilot
+seed: 51
+episodes: 4
+
+tracks: [glc_ot_ez, test]
+
+ego:
+  policy: ego_h2h_spliner_gt
+
+opponents:
+  count: 1
+  policies: [opp_h2h_spliner]
+
+episode:
+  laps: 2
+  spawn_frac: {uniform: [0.0, 1.0]}
+  start_gap_m: {uniform: [2.0, 6.0]}
+  opp_start: {choice: [ahead, behind]}
+  warmup_s: 2.0
+  timeout_s: 120.0
+  decouple: {gap_m: 15.0, duration_s: 5.0}
