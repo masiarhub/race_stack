@@ -123,6 +123,22 @@ off (`perception: 'False'`); [ego_h2h_spliner.yaml](policies/ego_h2h_spliner.yam
 
 [specs/known_answer.yaml](specs/known_answer.yaml) records opponents with fixed, known parameters for `policies`.
 
+## Data folder
+
+`data/` (git-ignored, the default `--out`) has one folder per spec name and in it one timestamped run per `mine`
+call. A run's `manifest.json` names the commit it was mined at.
+
+| folder | spec | context |
+|---|---|---|
+| `h2h_v1/` | [h2h_v1](specs/h2h_v1.yaml) | First head-to-head dataset, glc_ot_ez only: the race stack head-to-head ego against the time-trials raceline, line follower and blocker opponents. Recorded with the perfect-perception ego and ground-truth x. The run also holds `dataset_h3.csv` (history 3, extracted later) and the predictors trained on it in `models/` (`baseline`, `history3`, `history3_mirror`). |
+| `smoke/` | none | `diag_speed.py` and `diag_tracker.py`, diagnosis scripts from a smoke run of h2h_v1: what the ego's perception reported of the opponent, against the opponent's true state. |
+| `known_answer/` | [known_answer](specs/known_answer.yaml) | Opponents with fixed, known parameters (line followers at a left and right offset, blockers) for `check policies`, recorded with the perfect-perception ego. |
+| `h2h_pilot_test/` | [h2h_pilot_test](specs/h2h_pilot_test.yaml) | h2h_v1 on the hand-drawn `test` map, the first new track for the track-variety study. |
+| `h2h_pilot_maps/` | [h2h_pilot_maps](specs/h2h_pilot_maps.yaml) | h2h_v1 on GLC_smile_small and hangar_1905_v0. `action_plots_history3[_mirror]` are the history-3 predictors' action plots on it. |
+| `h2h_v2/`, `h2h_v2_mine.log` | [h2h_v2](specs/h2h_v2.yaml) | The h2h_v1 opponents on all four tracks, 240 episodes (122k rows). `models/variety` is the track-variety ensemble study (per-seed models, rollout and feedback results). The log is the console output of `mine`. |
+| `bench_pilot/` | [bench_pilot](specs/bench_pilot.yaml) | Both f1tenth_benchmarks opponents (pure pursuit, follow-the-gap). On glc_ot_ez and test, the tracks follow-the-gap laps. |
+| `opp_h2h_pilot/` | [opp_h2h_pilot](specs/opp_h2h_pilot.yaml) | The race stack head-to-head stack as the opponent (both cars with perfect perception), starting ahead of and behind the ego, with RViz. |
+
 ## Terms
 
 | term | meaning |
