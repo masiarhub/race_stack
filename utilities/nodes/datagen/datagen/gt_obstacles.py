@@ -1,7 +1,10 @@
 """
-Ground-truth perception for the ego in simulation: publishes the opponent's true state on /perception/obstacles,
-in the frame and format of the race stack tracker, in place of its detection and tracking. The ego then reacts to
-the opponent as if perception were perfect, independent of how the detection module develops.
+Ground-truth perception in simulation: publishes the other car's true state on a car's perception topic, in the
+frame and format of the race stack tracker, in place of its detection and tracking. The car then reacts to the
+other one as if perception were perfect, independent of how the detection module develops.
+
+Defaults: for the ego (the true opponent on /perception/obstacles). For the opponent: observed_odom
+/opp_racecar/opp_odom (the ego as the bridge reports it to the opponent), topic /opp_racecar/perception/obstacles.
 """
 import os
 
@@ -16,6 +19,10 @@ from datagen.extract import TRACKER_LINE
 from datagen.track import Track, body_to_map
 
 OPP_ODOM = '/opp_racecar/odom'
+ROLES = {  # role -> (odometry of the car it observes, perception topic it publishes on)
+    'ego': (OPP_ODOM, '/perception/obstacles'),
+    'opp': ('/opp_racecar/opp_odom', '/opp_racecar/perception/obstacles'),
+}
 
 
 def obstacle_from_state(line: Track, x: float, y: float, yaw: float, vx_body: float, vy_body: float,
@@ -36,16 +43,17 @@ class GtObstacles(Node):
         super().__init__('gt_obstacles')
         ro = ParameterDescriptor(read_only=True)
         # size_m: extent along and across the line, like the tracker's single size; 0.58 m is the sim car length
-        for name, default in (('map_dir', ''), ('size_m', 0.58), ('rate_hz', 40.0)):
+        for name, default in (('map_dir', ''), ('size_m', 0.58), ('rate_hz', 40.0), ('role', 'ego')):
             self.declare_parameter(name, default, ro)
         wpnts = os.path.join(self.get_parameter('map_dir').value, 'global_waypoints.json')
         self.line = Track.from_json(wpnts, TRACKER_LINE)
         self.size = self.get_parameter('size_m').value
-        self.opp = None
-        self.create_subscription(Odometry, OPP_ODOM, lambda m: setattr(self, 'opp', m), 10)
-        self.pub = self.create_publisher(ObstacleArray, '/perception/obstacles', 5)
+        observed, topic = ROLES[self.get_parameter('role').value]
+        self.opp = None  # the observed car
+        self.create_subscription(Odometry, observed, lambda m: setattr(self, 'opp', m), 10)
+        self.pub = self.create_publisher(ObstacleArray, topic, 5)
         self.create_timer(1.0 / self.get_parameter('rate_hz').value, self.step)
-        self.get_logger().info("Publishing the true opponent on /perception/obstacles")
+        self.get_logger().info(f"Publishing the true car of {observed} on {topic}")
 
     def step(self):
         if self.opp is None:

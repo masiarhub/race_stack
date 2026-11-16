@@ -76,9 +76,10 @@ def launch_setup(context):
         cmd=['ros2', 'bag', 'record', '-o', os.path.join(ep_dir, 'bag')] + ep['record_topics'],
         output='log')
 
-    # perfect perception for the ego: the true opponent on /perception/obstacles instead of detection and tracking
-    perception = [Node(package='datagen', executable='gt_obstacles', name='gt_obstacles', output='screen',
-                       parameters=[{'map_dir': ep['map_dir']}])] if ep['ego_policy'].get('ground_truth_obstacles') else []
+    # perfect perception: the other car's true state on a policy's perception topic instead of detection and tracking
+    perception = [Node(package='datagen', executable='gt_obstacles', name=f'{role}_gt_obstacles', output='screen',
+                       parameters=[{'map_dir': ep['map_dir'], 'role': role}])
+                  for role in ('ego', 'opp') if ep[f'{role}_policy'].get('ground_truth_obstacles')]
 
     manager = Node(
         package='datagen', executable='episode_manager', name='episode_manager', output='screen',

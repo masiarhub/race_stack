@@ -11,6 +11,7 @@
         <set_remap from="/global_waypoints_scaled" to="/opp_racecar/global_waypoints_scaled" if="$(var sim_opp)" />
         <set_remap from="/state_marker" to="/opp_racecar/state_marker" if="$(var sim_opp)" />
         <set_remap from="/perception/obstacles" to="/opp_racecar/perception/obstacles" if="$(var sim_opp)" />
+        <set_remap from="/planner/avoidance/otwpnts" to="/opp_racecar/planner/avoidance/otwpnts" if="$(var sim_opp)" />
         <node pkg="state_machine" name="state_machine" exec="state_machine" output="screen">
             <param from="$(find-pkg-share stack_master)/config/state_machine_params.yaml"/>
             <param name="mode" value="$(var mode)"/>

@@ -1,6 +1,17 @@
 <launch>
+    <arg name="sim_opp" default="False" description="True to remap topics to the simulated opponent ones" />
 
-    <node pkg="spline_planner" exec="spline_planner" name="spline_planner" output="screen">
-    </node>
+    <group>
+        <set_remap from="/car_state/frenet/odom" to="/opp_racecar/frenet/odom" if="$(var sim_opp)" />
+        <set_remap from="/global_waypoints_scaled" to="/opp_racecar/global_waypoints_scaled" if="$(var sim_opp)" />
+        <set_remap from="/perception/obstacles" to="/opp_racecar/perception/obstacles" if="$(var sim_opp)" />
+        <set_remap from="/planner/avoidance/otwpnts" to="/opp_racecar/planner/avoidance/otwpnts" if="$(var sim_opp)" />
+        <set_remap from="/planner/avoidance/markers" to="/opp_racecar/planner/avoidance/markers" if="$(var sim_opp)" />
+        <set_remap from="/planner/avoidance/considered_OBS" to="/opp_racecar/planner/avoidance/considered_OBS" if="$(var sim_opp)" />
+        <set_remap from="/planner/avoidance/propagated_obs" to="/opp_racecar/planner/avoidance/propagated_obs" if="$(var sim_opp)" />
+        <set_remap from="/planner/avoidance/latency" to="/opp_racecar/planner/avoidance/latency" if="$(var sim_opp)" />
+        <node pkg="spline_planner" exec="spline_planner" name="spline_planner" output="screen">
+        </node>
+    </group>
 
 </launch>

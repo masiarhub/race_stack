@@ -7,22 +7,31 @@
     <!-- MAP / PP -->
     <arg name="measure" default="False" />
     <arg name="perception" default="True" description="False to skip detection and tracking, e.g. when another node publishes /perception/obstacles" />
+    <arg name="sim_opp" default="False" description="True to run the head to head stack as the simulated opponent (remaps topics to the opponent ones)" />
+
+    <group>
+    <!-- sim opponent: own namespace so node names do not clash with the ego ones -->
+    <push-ros-namespace namespace="opp_racecar" if="$(var sim_opp)" />
 
     <!-- launch controller manager -->
     <include file="$(find-pkg-share controller)/launch/controller_launch.xml">
         <arg name="mode" value="$(var ctrl_algo)"/>
+        <arg name="sim_opp" value="$(var sim_opp)" />
     </include>
 
     <!-- launch state machine -->
     <include file="$(find-pkg-share state_machine)/launch/state_machine_launch.xml">
         <arg name="mode" value="head_to_head"/>
         <arg name="overtake_mode" value="$(var overtake_mode)"/>
+        <arg name="sim_opp" value="$(var sim_opp)" />
     </include>
 
     <!-- SPLINE PLANNER-->
     <!-- this is actually the only way this works -->
     <group if="$(eval '\'$(var overtake_mode)\' == \'spliner\'')">
-        <include file="$(find-pkg-share spline_planner)/launch/spline_planner_launch.xml" />
+        <include file="$(find-pkg-share spline_planner)/launch/spline_planner_launch.xml">
+            <arg name="sim_opp" value="$(var sim_opp)" />
+        </include>
     </group>
 
     <!-- PERCEPTION -->
@@ -32,8 +41,25 @@
         </include>
     </group>
 
-    <!-- LOCAL PLANNER -->
-    <include file="$(find-pkg-share local_planner)/launch/local_planner_launch.xml" />
+    <!-- frenet odom of the sim opponent, the ego one comes from base_system -->
+    <node pkg="frenet_odom_republisher" exec="frenet_odom_republisher_node" name="frenet_odom_republisher"
+        output="screen" if="$(var sim_opp)">
+        <param name="base_frame" value="opp_racecar/base_link" />
+        <remap from="/state_estimation/odom" to="/opp_racecar/odom" />
+        <remap from="/car_state/frenet/odom" to="/opp_racecar/frenet/odom" />
+    </node>
 
+    <!-- own sector tuner of the sim opponent, so it can be scaled independently of the ego (loads the base system map sectors) -->
+    <node pkg="sector_tuner" name="sector_tuner" exec="sector_tuner" if="$(var sim_opp)">
+        <remap from="/global_waypoints_scaled" to="/opp_racecar/global_waypoints_scaled" />
+        <remap from="/global_waypoints_scaled/shortest_path" to="/opp_racecar/global_waypoints_scaled/shortest_path" />
+        <remap from="/sector_markers" to="/opp_racecar/sector_markers" />
+    </node>
+
+    <!-- LOCAL PLANNER -->
+    <include file="$(find-pkg-share local_planner)/launch/local_planner_launch.xml">
+        <arg name="sim_opp" value="$(var sim_opp)" />
+    </include>
+    </group>
 
 </launch>

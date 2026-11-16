@@ -98,3 +98,8 @@ def test_the_opponent_can_start_behind(tmp_path, monkeypatch):
 def test_opp_start_must_be_ahead_or_behind(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match='opp_start'):
         load_spec(_spec_with_rules(tmp_path, monkeypatch, {'opp_start': {'choice': ['ahead', 'beside']}}))
+
+
+def test_an_opponent_can_see_the_ego_perfectly(tmp_path, monkeypatch):
+    spec = load_spec(_spec(tmp_path, monkeypatch, ['opp_h2h_spliner']))
+    assert plan_episode(spec, 0)['opp_policy']['ground_truth_obstacles']

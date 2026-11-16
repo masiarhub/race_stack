@@ -1,0 +1,17 @@
+# Opponent: the race stack head-to-head stack (first party) with perfect perception, the same stack as the ego.
+# It trails the ego and overtakes it with the spline planner. Detection and tracking are off, datagen's gt_obstacles
+# node publishes the true ego on /opp_racecar/perception/obstacles in the tracker's format.
+name: opp_h2h_spliner
+kind: launch
+launch: {package: stack_master, file: head_to_head_launch.xml}
+args:
+  sim_opp: true
+  racecar_version: SIM
+  ctrl_algo: MAP
+  overtake_mode: spliner
+  perception: 'False'
+params:
+  /opp_racecar/sector_tuner:
+    global_limit: {uniform: [0.25, 0.4], step: 0.01}  # fraction of the raceline speed profile (the ego runs at 0.5)
+ground_truth_obstacles: true
+ready_topics: [/opp_racecar/perception/obstacles]

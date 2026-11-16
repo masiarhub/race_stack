@@ -17,8 +17,9 @@ Two kinds:
 Contract for an opponent policy: its nodes live in /opp_racecar and it publishes
 AckermannDriveStamped on /opp_drive. An ego policy publishes on /drive.
 
-`ground_truth_obstacles: true` (ego policies only): datagen's gt_obstacles node publishes the true opponent on
-/perception/obstacles. The policy must then not run its own detection and tracking (e.g. perception: false).
+`ground_truth_obstacles: true`: datagen's gt_obstacles node publishes the other car's true state on the policy's
+perception topic (/perception/obstacles for the ego, /opp_racecar/perception/obstacles for the opponent). The policy
+must then not run its own detection and tracking (e.g. perception: false).
 """
 import dataclasses
 import hashlib

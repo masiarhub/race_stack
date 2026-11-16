@@ -97,15 +97,13 @@ laps only glc_ot_ez and test; both policy files say why and how their ranges wer
 
 Contract: opponent nodes live in `/opp_racecar` and publish `/opp_drive`; the ego publishes `/drive`.
 
-Perfect perception for the ego: an ego policy with `ground_truth_obstacles: true` (and its own detection and
-tracking off) gets the true opponent on `/perception/obstacles` from datagen's `gt_obstacles` node, in the
-tracker's format and frame. [ego_h2h_spliner_gt.yaml](policies/ego_h2h_spliner_gt.yaml) is the race stack
-head-to-head stack in this mode; [ego_h2h_spliner.yaml](policies/ego_h2h_spliner.yaml) keeps the real perception.
-
-Ego perception: `ground_truth_obstacles: true` in an ego policy starts datagen's `gt_obstacles` node, which publishes
-the true opponent on `/perception/obstacles` in the tracker's format, so the ego reacts as if perception were perfect.
-[ego_h2h_spliner_gt.yaml](policies/ego_h2h_spliner_gt.yaml) uses it and turns the race stack's detection and tracking
-off (`perception: 'False'`); [ego_h2h_spliner.yaml](policies/ego_h2h_spliner.yaml) keeps them, e.g. for `check perception`.
+Perfect perception: a policy with `ground_truth_obstacles: true` (and its own detection and tracking off) gets the
+other car's true state from datagen's `gt_obstacles` node, in the tracker's format and frame: the ego on
+`/perception/obstacles`, the opponent on `/opp_racecar/perception/obstacles`. It then reacts as if perception were
+perfect. [ego_h2h_spliner_gt.yaml](policies/ego_h2h_spliner_gt.yaml) is the race stack head-to-head stack in this
+mode, [ego_h2h_spliner.yaml](policies/ego_h2h_spliner.yaml) keeps the real perception (e.g. for `check perception`),
+and [opp_h2h_spliner.yaml](policies/opp_h2h_spliner.yaml) runs the same head-to-head stack as the opponent
+(`head_to_head_launch.xml sim_opp:=true`).
 
 ## Limits
 
