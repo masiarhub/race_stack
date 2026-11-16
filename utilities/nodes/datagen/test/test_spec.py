@@ -71,3 +71,30 @@ def test_opponent_tracks_must_be_spec_tracks(tmp_path, monkeypatch):
         load_spec(_spec(tmp_path, monkeypatch, [{'policy': 'opp_blocker', 'tracks': ['hangar_1905_v0']}]))
     with pytest.raises(ValueError, match='policy'):
         load_spec(_spec(tmp_path, monkeypatch, [{'tracks': ['test']}]))
+
+
+def _spec_with_rules(tmp_path, monkeypatch, rules):
+    path = _spec(tmp_path, monkeypatch, ['opp_line_follower'])
+    spec = yaml.safe_load(open(path))
+    spec['episode'] = rules
+    with open(path, 'w') as f:
+        yaml.safe_dump(spec, f)
+    return path
+
+
+def test_the_opponent_starts_ahead_by_default():
+    spec = load_spec(SPEC)
+    assert all(plan_episode(spec, i)['spawn']['gap_m'] > 0 for i in range(6))
+
+
+def test_the_opponent_can_start_behind(tmp_path, monkeypatch):
+    spec = load_spec(_spec_with_rules(tmp_path, monkeypatch, {'opp_start': {'choice': ['ahead', 'behind']},
+                                                               'start_gap_m': {'uniform': [2.0, 6.0]}}))
+    gaps = [plan_episode(spec, i)['spawn']['gap_m'] for i in range(20)]
+    assert any(g < 0 for g in gaps) and any(g > 0 for g in gaps)  # signed: negative is behind the ego
+    assert all(2.0 <= abs(g) <= 6.0 for g in gaps)
+
+
+def test_opp_start_must_be_ahead_or_behind(tmp_path, monkeypatch):
+    with pytest.raises(ValueError, match='opp_start'):
+        load_spec(_spec_with_rules(tmp_path, monkeypatch, {'opp_start': {'choice': ['ahead', 'beside']}}))

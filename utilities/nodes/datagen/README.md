@@ -44,7 +44,9 @@ orientations of a track.
 Every episode is a fresh launch of the whole stack (no state carries over).
 
 **Start**
-1. Ego spawns on the raceline at `spawn_frac * L`, the opponent `start_gap_m` ahead, both at rest.
+1. Ego spawns on the raceline at `spawn_frac * L`, the opponent `start_gap_m` ahead of it, or behind it with
+   `opp_start: behind` (e.g. `{choice: [ahead, behind]}`), both at rest. The plan stores the gap signed, negative
+   when the opponent starts behind.
 2. The simulator is frozen (start gate) until all are ready for `settle_s`: both odometries at the spawn,
    `/drive`, `/opp_drive` and the policies' `ready_topics` (e.g. `/perception/obstacles`) publishing.
    Not ready within `startup_timeout_s` -> `startup_failed`, retried with the same plan.

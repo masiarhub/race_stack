@@ -17,7 +17,8 @@ MAP_FILES = ('global_waypoints.json', 'speed_scaling.yaml', 'ot_sectors.yaml')
 EPISODE_DEFAULTS = {
     'laps': 2,                      # normal end: the ego covered laps * track length
     'spawn_frac': {'uniform': [0.0, 1.0]},  # ego spawn on the raceline, fraction of the lap
-    'start_gap_m': {'uniform': [2.0, 6.0]},  # opponent spawns this far ahead of the ego along the raceline
+    'start_gap_m': {'uniform': [2.0, 6.0]},  # distance between the two spawns along the raceline
+    'opp_start': 'ahead',           # ahead | behind the ego, e.g. {choice: [ahead, behind]}
     'warmup_s': 2.0,                # both cars start at rest, these seconds are dropped at extraction
     'settle_s': 1.0,                # all readiness checks must hold this long before the start gate opens
     'startup_timeout_s': 90.0,
@@ -120,6 +121,9 @@ def validate(spec: dict):
         errors.append("ego.policy: missing")
     if int(spec['episodes']) < 1:
         errors.append("episodes: must be >= 1")
+    start = spec['episode']['opp_start']
+    if set(start['choice'] if isinstance(start, dict) and 'choice' in start else [start]) - {'ahead', 'behind'}:
+        errors.append(f"episode.opp_start: {start} must be ahead, behind or a choice of them")
     # resolve every policy once, so a broken definition fails before any simulation
     spec_dir = os.path.dirname(spec['_path'])
     for role, ref in [('ego', spec.get('ego', {}).get('policy'))] + [('opp', r) for r, _ in opponent_entries(spec)]:
@@ -159,7 +163,7 @@ def plan_episode(spec: dict, idx: int) -> dict:
         'track_length_m': raceline.length,
         'spawn': {
             'ego_s_m': rules['spawn_frac'] * raceline.length,
-            'gap_m': rules['start_gap_m'],
+            'gap_m': rules['start_gap_m'] * (1 if rules['opp_start'] == 'ahead' else -1),  # negative: behind
         },
         'rules': rules,
         'ego_policy': ego_policy,
